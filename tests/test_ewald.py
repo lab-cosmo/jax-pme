@@ -309,15 +309,17 @@ def test_madelung(crystal_name, scaling_factor, calc_name):
         lr_wavelength = 0.5 * smearing
         rtol = 4e-6
 
-        inputs = Ewald.prepare(atoms, charges, sr_cutoff, lr_wavelength, smearing)
-        calculate = Ewald.energy
+        calc = Ewald()
+        inputs = calc.prepare(atoms, charges, sr_cutoff, lr_wavelength, smearing)
+        calculate = calc.energy
     elif calc_name == "pme":
         sr_cutoff = 2 * scaling_factor
         smearing = sr_cutoff / 5.0
         rtol = 9e-4
 
-        inputs = PME.prepare(atoms, charges, sr_cutoff, smearing / 8, smearing)
-        calculate = PME.energy
+        calc = PME()
+        inputs = calc.prepare(atoms, charges, sr_cutoff, smearing / 8, smearing)
+        calculate = calc.energy
 
     # Compute potential and compare against target value using default hypers
     energy = calculate(*inputs)
@@ -377,8 +379,10 @@ def test_wigner(crystal_name, scaling_factor):
 
         lr_wavelength = smeareff / 2
 
-        inputs = Ewald.prepare(atoms, charges, cutoff, lr_wavelength, smeareff)
-        potentials = Ewald.potentials(*inputs)
+        calc = Ewald()
+
+        inputs = calc.prepare(atoms, charges, cutoff, lr_wavelength, smeareff)
+        potentials = calc.potentials(*inputs)
 
         energies = potentials * charges
         energies_ref = -jnp.ones_like(energies) * madelung_ref / 2
@@ -428,25 +432,22 @@ def test_random_structure(sr_cutoff, frame_index, scaling_factor, ortho, calc_na
 
     # Compute potential using torch-pme and compare against reference values
     if calc_name == "ewald":
-        inputs = Ewald.prepare(atoms, charges, sr_cutoff, smearing / 2, smearing)
-
-        calculate = jax.value_and_grad(Ewald.energy, argnums=2)
+        calc = Ewald()
+        inputs = calc.prepare(atoms, charges, sr_cutoff, smearing / 2, smearing)
 
         rtol_e = 2e-5
         rtol_f = 3.5e-3
     elif calc_name == "pme":
-        inputs = PME.prepare(atoms, charges, sr_cutoff, smearing / 8, smearing)
-
-        calculate = jax.value_and_grad(PME.energy, argnums=2)
+        calc = PME()
+        inputs = calc.prepare(atoms, charges, sr_cutoff, smearing / 8, smearing)
 
         rtol_e = 4.5e-3
         rtol_f = 5.0e-3
 
-    energy, forces = calculate(*inputs)
+    energy, forces = calc.energy_forces(*inputs)
 
     # Compute energy. The double counting of the pairs is already taken into account.
     np.testing.assert_allclose(energy, energy_target, atol=0.0, rtol=rtol_e)
 
     # Compute forces
-    forces = -1 * forces
     np.testing.assert_allclose(forces, forces_target @ ortho, atol=0.0, rtol=rtol_f)

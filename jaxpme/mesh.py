@@ -2,7 +2,7 @@ import jax.numpy as jnp
 
 
 def lagrange(interpolation_nodes=4):
-    assert interpolation_nodes == 4, "cannot be bothered"
+    assert interpolation_nodes == 4, "interpolation_nodes != not yet implemented"
     even = interpolation_nodes % 2 == 0
 
     def compute_weights(inverse_cell, positions, ns):

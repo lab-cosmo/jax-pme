@@ -3,11 +3,9 @@ import jax.numpy as jnp
 
 from functools import partial
 
-# conventions:
-# - reciprocal_cell contains (like cell) the *reciprocal* basis in rows
-
 
 def get_reciprocal(cell):
+    # note: reciprocal is in rows (like cell)
     return jnp.linalg.inv(cell).T * 2 * jnp.pi
 
 
@@ -17,7 +15,8 @@ def get_kgrid_ewald(cell, lr_wavelength):
 
     shape = (int(ns[0]), int(ns[1]), int(ns[2]))
 
-    # return jax.ShapeDtypeStruct(shape=shape, dtype=jnp.float32)
+    # in principle, ShapeDtypeStruct would suffice here, but this
+    # does not play well with batching -- you can't reshape...
     return jnp.ones(shape)
 
 
@@ -28,7 +27,6 @@ def get_kgrid_mesh(cell, mesh_spacing):
 
     shape = (int(ns[0]), int(ns[1]), int(ns[2]))
 
-    # return jax.ShapeDtypeStruct(shape=shape, dtype=jnp.float32)
     return jnp.ones(shape)
 
 
@@ -36,7 +34,6 @@ def get_kgrid_mesh(cell, mesh_spacing):
 def generate_kvectors(reciprocal_cell, shape, for_ewald=True, dtype=jnp.float32):
     # The frequencies from the fftfreq function  are of the form [0, 1/n, 2/n, ...]
     # These are then converted to [0, 1, 2, ...] by multiplying with n.
-
     kxs = (reciprocal_cell[0] * shape[0]) * jnp.fft.fftfreq(shape[0], dtype=dtype)[
         ..., None
     ]
@@ -53,7 +50,7 @@ def generate_kvectors(reciprocal_cell, shape, for_ewald=True, dtype=jnp.float32)
             ..., None
         ]
 
-    # then take the cartesian product (all possible combinations, same as meshgrid)
+    # then take the cartesian product
     result = kxs[:, None, None] + kys[None, :, None] + kzs[None, None, :]
 
     if for_ewald:

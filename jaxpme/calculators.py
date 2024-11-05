@@ -14,7 +14,7 @@ Calculator = namedtuple(
 )
 
 
-def Ewald(exponent=1, exclusion_radius=None):
+def Ewald(exponent=1, exclusion_radius=None, prefactor=1.0):
     # instantiate here so we have access in the prepare_fn (not used yet)
     pot = potential(exponent=exponent, exclusion_radius=exclusion_radius)
     solver = ewald(pot)
@@ -40,7 +40,7 @@ def Ewald(exponent=1, exclusion_radius=None):
         rspace = solver.rspace(smearing, charges, r, i, j)
         kspace = solver.kspace(smearing, charges, kvectors, positions, volume)
 
-        return rspace + kspace
+        return prefactor * (rspace + kspace)
 
     def prepare_fn(atoms, charges, cutoff, lr_wavelength, smearing):
         from .kspace import get_kgrid_ewald
@@ -63,7 +63,7 @@ def Ewald(exponent=1, exclusion_radius=None):
     return Calculator(prepare_fn, potentials_fn, *get_calculate_functions(potentials_fn))
 
 
-def PME(exponent=1, exclusion_radius=None, interpolation_nodes=4):
+def PME(exponent=1, exclusion_radius=None, prefactor=1.0, interpolation_nodes=4):
     # instantiate here so we have access in the prepare_fn (not used yet)
     pot = potential(exponent=exponent, exclusion_radius=exclusion_radius)
     solver = pme(pot, interpolation_nodes=interpolation_nodes)
@@ -94,7 +94,7 @@ def PME(exponent=1, exclusion_radius=None, interpolation_nodes=4):
             smearing, charges, inverse_cell, k_grid, kvectors, positions, volume
         )
 
-        return rspace + kspace
+        return prefactor * (rspace + kspace)
 
     def prepare_fn(atoms, charges, cutoff, mesh_spacing, smearing):
         from .kspace import get_kgrid_mesh
@@ -132,7 +132,7 @@ def get_calculate_functions(potentials_fn):
         return energy, -grads
 
     def energy_and_forces_and_stress_fn(charges, cell, positions, *args):
-        energy, (pos_grads, cell_grads) = jax.value_and_grad(energy_fn, argnums=(1, 2))(
+        energy, (cell_grads, pos_grads) = jax.value_and_grad(energy_fn, argnums=(1, 2))(
             charges, cell, positions, *args
         )
 

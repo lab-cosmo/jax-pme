@@ -16,7 +16,6 @@ def potential(exponent=1, exclusion_radius=None):
     if exclusion_radius is not None:
 
         def cutoff_function(r):
-            # todo: double masking
             return jnp.where(
                 r < exclusion_radius,
                 (1 + jnp.cos(r * (jnp.pi / exclusion_radius))) * 0.5,
@@ -52,11 +51,11 @@ RawPotential = namedtuple(
 
 def coulomb():
     def lr_k2(smearing, k2):
-        # todo: double masking
+        masked = jnp.where(k2 == 0.0, 1e-5, k2)  # avoid NaNs in gradients
         return jnp.where(
             k2 == 0.0,
             0.0,
-            4 * jnp.pi * jnp.exp(-0.5 * smearing**2 * k2) / k2,
+            4 * jnp.pi * jnp.exp(-0.5 * smearing**2 * masked) / masked,
         )
 
     def lr_r(smearing, r):

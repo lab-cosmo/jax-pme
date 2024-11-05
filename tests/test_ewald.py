@@ -396,58 +396,56 @@ def test_wigner(crystal_name, scaling_factor):
 @pytest.mark.parametrize("calc_name", ["ewald", "pme"])
 def test_random_structure(sr_cutoff, frame_index, scaling_factor, ortho, calc_name):
     """
-    Check that the potentials obtained from the main code agree with the ones computed
-    using an external library (GROMACS) for more complicated structures consisting of
-    8 atoms placed randomly in cubic cells of varying sizes.
+    Verify that energy, forces and stress agree with GROMACS.
+
+    Structures consisting of 4 Na and 4 Cl atoms placed randomly in cubic cells of
+    varying sizes.
+
+    GROMACS values are computed with SPME and parameters as defined in the manual:
+    https://manual.gromacs.org/documentation/current/user-guide/mdp-options.html#ewald
     """
-    # Get the predefined frames with the
-    # Coulomb energy and forces computed by GROMACS using PME
-    # using parameters as defined in the GROMACS manual
-    # https://manual.gromacs.org/documentation/current/user-guide/mdp-options.html#ewald
-    #
-    # coulombtype = PME
-    # fourierspacing = 0.01  ; 1/nm
+    # coulombtype = PME fourierspacing = 0.01 ; 1/nm
     # pme_order = 8
     # rcoulomb = 0.3  ; nm
+    from jaxpme import prefactors
+
     struc_path = "reference_structures/"
     frame = read(os.path.join(struc_path, "coulomb_test_frames.xyz"), frame_index)
 
-    # Energies in Gaussian units (without e²/[4 π ɛ_0] prefactor)
     energy_target = jnp.array(frame.get_potential_energy(), dtype=DTYPE) / scaling_factor
-    # Forces in Gaussian units per Å
     forces_target = jnp.array(frame.get_forces(), dtype=DTYPE) / scaling_factor**2
+    stress_target = (
+        jnp.array(frame.get_stress(voigt=False, include_ideal_gas=False), dtype=DTYPE)
+        / scaling_factor
+    )
+    stress_target *= 2.0  # convert from GROMACS "virial"
 
-    # Convert into input format suitable for torch-pme
     positions = scaling_factor * (jnp.array(frame.positions, dtype=DTYPE) @ ortho)
 
-    # Enable backward for positions
-    positions.requires_grad = True
-
     cell = scaling_factor * jnp.array(np.array(frame.cell), dtype=DTYPE) @ ortho
-    charges = jnp.array([1, 1, 1, 1, -1, -1, -1, -1], dtype=DTYPE).reshape((-1, 1))
+    charges = jnp.array([1, 1, 1, 1, -1, -1, -1, -1], dtype=DTYPE)
     sr_cutoff = scaling_factor * sr_cutoff
     smearing = sr_cutoff / 6.0
 
     atoms = Atoms(positions=positions, cell=cell, pbc=True)
 
-    # Compute potential using torch-pme and compare against reference values
     if calc_name == "ewald":
-        calc = Ewald()
+        calc = Ewald(prefactor=prefactors.eV_A)
         inputs = calc.prepare(atoms, charges, sr_cutoff, smearing / 2, smearing)
 
         rtol_e = 2e-5
         rtol_f = 3.5e-3
     elif calc_name == "pme":
-        calc = PME()
+        calc = PME(prefactor=prefactors.eV_A)
         inputs = calc.prepare(atoms, charges, sr_cutoff, smearing / 8, smearing)
 
         rtol_e = 4.5e-3
         rtol_f = 5.0e-3
 
-    energy, forces = calc.energy_forces(*inputs)
+    energy, forces, stress = calc.energy_forces_stress(*inputs)
 
-    # Compute energy. The double counting of the pairs is already taken into account.
     np.testing.assert_allclose(energy, energy_target, atol=0.0, rtol=rtol_e)
-
-    # Compute forces
     np.testing.assert_allclose(forces, forces_target @ ortho, atol=0.0, rtol=rtol_f)
+
+    stress_target = jnp.einsum("ab,aA,bB->AB", stress_target, ortho, ortho)
+    np.testing.assert_allclose(stress, stress_target, atol=0.0, rtol=2e-3)

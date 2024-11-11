@@ -20,6 +20,25 @@ from jaxpme import PME, Ewald
 DTYPE = jnp.float64
 
 
+def get_calculator(name, potential, prefactor=1.0):
+    if name == "ewald":
+        if potential == "coulomb":
+            return Ewald(prefactor=prefactor)
+        else:
+            from jaxpme.potentials import inverse_power_law
+
+            iplp = inverse_power_law(1)
+            return Ewald(custom_potential=iplp, prefactor=prefactor)
+    elif name == "pme":
+        if potential == "coulomb":
+            return PME(prefactor=prefactor)
+        else:
+            from jaxpme.potentials import inverse_power_law
+
+            iplp = inverse_power_law(1)
+            return PME(custom_potential=iplp, prefactor=prefactor)
+
+
 def generate_orthogonal_transformations():
     # Generate rotation matrix along x-axis
     def rot_x(phi):
@@ -303,6 +322,8 @@ def test_madelung(crystal_name, scaling_factor, calc_name, potential):
     charges = jnp.array(charges).flatten()
     atoms = Atoms(positions=pos, cell=cell, pbc=True)
 
+    calc = get_calculator(calc_name, potential)
+
     # Define calculator and tolerances
     if calc_name == "ewald":
         sr_cutoff = scaling_factor
@@ -310,13 +331,6 @@ def test_madelung(crystal_name, scaling_factor, calc_name, potential):
         lr_wavelength = 0.5 * smearing
         rtol = 4e-6
 
-        if potential == "coulomb":
-            calc = Ewald()
-        else:
-            from jaxpme.potentials import inverse_power_law
-
-            iplp = inverse_power_law(1)
-            calc = Ewald(custom_potential=iplp)
         inputs = calc.prepare(atoms, charges, sr_cutoff, lr_wavelength, smearing)
         calculate = calc.energy
     elif calc_name == "pme":
@@ -324,13 +338,6 @@ def test_madelung(crystal_name, scaling_factor, calc_name, potential):
         smearing = sr_cutoff / 5.0
         rtol = 9e-4
 
-        if potential == "coulomb":
-            calc = PME()
-        else:
-            from jaxpme.potentials import inverse_power_law
-
-            iplp = inverse_power_law(1)
-            calc = PME(custom_potential=iplp)
         inputs = calc.prepare(atoms, charges, sr_cutoff, smearing / 8, smearing)
         calculate = calc.energy
 
@@ -407,7 +414,8 @@ def test_wigner(crystal_name, scaling_factor):
 @pytest.mark.parametrize("scaling_factor", [0.4325, 1.3353610])
 @pytest.mark.parametrize("ortho", generate_orthogonal_transformations())
 @pytest.mark.parametrize("calc_name", ["ewald", "pme"])
-def test_random_structure(sr_cutoff, frame_index, scaling_factor, ortho, calc_name):
+@pytest.mark.parametrize("potential", ["coulomb", "iplp"])
+def test_random_structure(sr_cutoff, frame_index, scaling_factor, ortho, calc_name, potential):
     """
     Verify that energy, forces and stress agree with GROMACS.
 
@@ -442,14 +450,13 @@ def test_random_structure(sr_cutoff, frame_index, scaling_factor, ortho, calc_na
 
     atoms = Atoms(positions=positions, cell=cell, pbc=True)
 
+    calc = get_calculator(calc_name, potential, prefactor=prefactors.eV_A)
     if calc_name == "ewald":
-        calc = Ewald(prefactor=prefactors.eV_A)
         inputs = calc.prepare(atoms, charges, sr_cutoff, smearing / 2, smearing)
 
         rtol_e = 2e-5
         rtol_f = 3.5e-3
     elif calc_name == "pme":
-        calc = PME(prefactor=prefactors.eV_A)
         inputs = calc.prepare(atoms, charges, sr_cutoff, smearing / 8, smearing)
 
         rtol_e = 4.5e-3

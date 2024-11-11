@@ -7,11 +7,14 @@ from collections import namedtuple
 Potential = namedtuple("Potential", ("sr", "lr", "correction"))
 
 
-def potential(exponent=1, exclusion_radius=None):
-    if exponent == 1:
-        pot = coulomb()
+def potential(exponent=1, exclusion_radius=None, custom_potential=None):
+    if custom_potential is None:
+        if exponent == 1:
+            pot = coulomb()
+        else:
+            pot = inverse_power_law(exponent)
     else:
-        raise ValueError("we do not yet support exponent != 1")
+        pot = custom_potential
 
     if exclusion_radius is not None:
 
@@ -69,5 +72,44 @@ def coulomb():
 
     def correction_self(smearing):
         return jnp.sqrt(2.0 / jnp.pi) / smearing
+
+    return RawPotential(sr_r, lr_r, lr_k2, correction_background, correction_self)
+
+
+def inverse_power_law(exponent):
+    from jax.scipy.special import gammainc, gammaincc, gammaln
+
+    def gamma(x):
+        return jnp.exp(gammaln(x))
+
+    def lr_k2(smearing, k2):
+        peff = (3 - exponent) / 2
+        factor = jnp.pi**1.5 / gamma(exponent / 2) * (2 * smearing**2) ** peff
+        x = 0.5 * smearing**2 * k2
+
+        masked = jnp.where(x == 0, 1e-5, x)
+        return jnp.where(
+            k2 == 0,
+            0.0,
+            factor * gammaincc(peff, masked) / masked**peff * gamma(peff),
+        )
+
+    def lr_r(smearing, r):
+        x = 0.5 * r**2 / smearing**2
+        peff = exponent / 2
+        factor = 1.0 / (2 * smearing**2) ** peff
+        return factor * gammainc(peff, x) / x**peff
+
+    def sr_r(smearing, r):
+        return r ** (-exponent) - lr_r(smearing, r)
+
+    def correction_background(smearing):
+        factor = jnp.pi**1.5 * (2 * smearing**2) ** ((3 - exponent) / 2)
+        factor /= (3 - exponent) * gamma(exponent / 2)
+        return factor
+
+    def correction_self(smearing):
+        phalf = exponent / 2
+        return 1 / gamma(phalf + 1) / (2 * smearing**2) ** phalf
 
     return RawPotential(sr_r, lr_r, lr_k2, correction_background, correction_self)

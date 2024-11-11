@@ -283,7 +283,8 @@ def define_crystal(crystal_name="CsCl"):
 )
 @pytest.mark.parametrize("scaling_factor", [1 / 2.0353610, 1.0, 3.4951291])
 @pytest.mark.parametrize("calc_name", ["ewald", "pme"])
-def test_madelung(crystal_name, scaling_factor, calc_name):
+@pytest.mark.parametrize("potential", ["coulomb", "iplp"])
+def test_madelung(crystal_name, scaling_factor, calc_name, potential):
     """
     Check that the Madelung constants obtained from the Ewald sum calculator matches
     the reference values.
@@ -309,7 +310,13 @@ def test_madelung(crystal_name, scaling_factor, calc_name):
         lr_wavelength = 0.5 * smearing
         rtol = 4e-6
 
-        calc = Ewald()
+        if potential == "coulomb":
+            calc = Ewald()
+        else:
+            from jaxpme.potentials import inverse_power_law
+
+            iplp = inverse_power_law(1)
+            calc = Ewald(custom_potential=iplp)
         inputs = calc.prepare(atoms, charges, sr_cutoff, lr_wavelength, smearing)
         calculate = calc.energy
     elif calc_name == "pme":
@@ -317,7 +324,13 @@ def test_madelung(crystal_name, scaling_factor, calc_name):
         smearing = sr_cutoff / 5.0
         rtol = 9e-4
 
-        calc = PME()
+        if potential == "coulomb":
+            calc = PME()
+        else:
+            from jaxpme.potentials import inverse_power_law
+
+            iplp = inverse_power_law(1)
+            calc = PME(custom_potential=iplp)
         inputs = calc.prepare(atoms, charges, sr_cutoff, smearing / 8, smearing)
         calculate = calc.energy
 

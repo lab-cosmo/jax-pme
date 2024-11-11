@@ -14,9 +14,13 @@ Calculator = namedtuple(
 )
 
 
-def Ewald(exponent=1, exclusion_radius=None, prefactor=1.0):
+def Ewald(exponent=1, exclusion_radius=None, prefactor=1.0, custom_potential=None):
     # instantiate here so we have access in the prepare_fn (not used yet)
-    pot = potential(exponent=exponent, exclusion_radius=exclusion_radius)
+    pot = potential(
+        exponent=exponent,
+        exclusion_radius=exclusion_radius,
+        custom_potential=custom_potential,
+    )
     solver = ewald(pot)
 
     def potentials_fn(
@@ -63,9 +67,19 @@ def Ewald(exponent=1, exclusion_radius=None, prefactor=1.0):
     return Calculator(prepare_fn, potentials_fn, *get_calculate_functions(potentials_fn))
 
 
-def PME(exponent=1, exclusion_radius=None, prefactor=1.0, interpolation_nodes=4):
+def PME(
+    exponent=1,
+    exclusion_radius=None,
+    prefactor=1.0,
+    interpolation_nodes=4,
+    custom_potential=None,
+):
     # instantiate here so we have access in the prepare_fn (not used yet)
-    pot = potential(exponent=exponent, exclusion_radius=exclusion_radius)
+    pot = potential(
+        exponent=exponent,
+        exclusion_radius=exclusion_radius,
+        custom_potential=custom_potential,
+    )
     solver = pme(pot, interpolation_nodes=interpolation_nodes)
 
     def potentials_fn(

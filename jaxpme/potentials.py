@@ -26,13 +26,19 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
             )
 
     def sr(smearing, r):
+        mask = r == 0.0
+        masked = jnp.where(mask, 1e-6, r)
         if exclusion_radius is not None:
-            return -pot.lr_r(smearing) * cutoff_function(r)
+            return jnp.where(
+                mask, 0.0, cutoff_function(masked) * -pot.lr_r(smearing, masked)
+            )
         else:
-            return pot.sr_r(smearing, r)
+            return jnp.where(mask, 0.0, pot.sr_r(smearing, masked))
 
     def lr(smearing, k2):
-        return pot.lr_k2(smearing, k2)
+        mask = k2 == 0.0
+        masked = jnp.where(mask, 1e-6, k2)
+        return jnp.where(mask, 0.0, pot.lr_k2(smearing, masked))
 
     def correction(smearing, charges, volume):
         c = -charges * pot.correction_self(smearing)
@@ -54,12 +60,7 @@ RawPotential = namedtuple(
 
 def coulomb():
     def lr_k2(smearing, k2):
-        masked = jnp.where(k2 == 0.0, 1e-5, k2)  # avoid NaNs in gradients
-        return jnp.where(
-            k2 == 0.0,
-            0.0,
-            4 * jnp.pi * jnp.exp(-0.5 * smearing**2 * masked) / masked,
-        )
+        return 4 * jnp.pi * jnp.exp(-0.5 * smearing**2 * k2) / k2
 
     def lr_r(smearing, r):
         return jax.scipy.special.erf(r / (smearing * jnp.sqrt(2.0))) / r
@@ -87,12 +88,7 @@ def inverse_power_law(exponent):
         factor = jnp.pi**1.5 / gamma(exponent / 2) * (2 * smearing**2) ** peff
         x = 0.5 * smearing**2 * k2
 
-        masked = jnp.where(x == 0, 1e-5, x)
-        return jnp.where(
-            k2 == 0,
-            0.0,
-            factor * gammaincc(peff, masked) / masked**peff * gamma(peff),
-        )
+        return (factor * gammaincc(peff, x) / x**peff) * gamma(peff)
 
     def lr_r(smearing, r):
         x = 0.5 * r**2 / smearing**2

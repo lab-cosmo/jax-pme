@@ -413,9 +413,12 @@ def test_wigner(crystal_name, scaling_factor):
 @pytest.mark.parametrize("frame_index", [0, 1, 2])
 @pytest.mark.parametrize("scaling_factor", [0.4325, 1.3353610])
 @pytest.mark.parametrize("ortho", generate_orthogonal_transformations())
-@pytest.mark.parametrize("calc_name", ["ewald", "pme"])
+@pytest.mark.parametrize("calc_name", ["pme", "ewald"])
 @pytest.mark.parametrize("potential", ["coulomb", "iplp"])
-def test_random_structure(sr_cutoff, frame_index, scaling_factor, ortho, calc_name, potential):
+@pytest.mark.parametrize("padded", [False, True])
+def test_random_structure(
+    sr_cutoff, frame_index, scaling_factor, ortho, calc_name, potential, padded
+):
     """
     Verify that energy, forces and stress agree with GROMACS.
 
@@ -462,10 +465,45 @@ def test_random_structure(sr_cutoff, frame_index, scaling_factor, ortho, calc_na
         rtol_e = 4.5e-3
         rtol_f = 5.0e-3
 
-    energy, forces, stress = calc.energy_forces_stress(*inputs)
+    if not padded:
+        energy, forces, stress = calc.energy_forces_stress(*inputs)
 
-    np.testing.assert_allclose(energy, energy_target, atol=0.0, rtol=rtol_e)
-    np.testing.assert_allclose(forces, forces_target @ ortho, atol=0.0, rtol=rtol_f)
+        np.testing.assert_allclose(energy, energy_target, atol=0.0, rtol=rtol_e)
+        np.testing.assert_allclose(forces, forces_target @ ortho, atol=0.0, rtol=rtol_f)
 
-    stress_target = jnp.einsum("ab,aA,bB->AB", stress_target, ortho, ortho)
-    np.testing.assert_allclose(stress, stress_target, atol=0.0, rtol=2e-3)
+        stress_target = jnp.einsum("ab,aA,bB->AB", stress_target, ortho, ortho)
+        np.testing.assert_allclose(stress, stress_target, atol=0.0, rtol=2e-3)
+
+    else:
+        num_extra_atoms = 3
+        num_extra_pairs = 5
+        N = positions.shape[0]
+
+        charges, cell, positions, i, j, S, *args = inputs
+        extra_charges = jnp.zeros(num_extra_atoms, dtype=charges.dtype)
+        extra_positions = jnp.zeros((num_extra_atoms, 3), dtype=positions.dtype)
+        extra_idx = jnp.array([N] * num_extra_pairs, dtype=i.dtype).flatten()
+        extra_S = jnp.ones((num_extra_pairs, 3), dtype=S.dtype)
+
+        charges = jnp.concatenate((charges, extra_charges))
+        positions = jnp.concatenate((positions, extra_positions))
+        i = jnp.concatenate((i, extra_idx))
+        j = jnp.concatenate((j, extra_idx))
+        S = jnp.concatenate((S, extra_S))
+
+        pair_mask = i != N
+        atom_mask = jnp.arange(positions.shape[0]) < N
+
+        inputs = (charges, cell, positions, i, j, S, *args)
+
+        energy, forces, stress = calc.energy_forces_stress(
+            *inputs, atom_mask=atom_mask, pair_mask=pair_mask
+        )
+
+        forces = forces[:N]
+
+        np.testing.assert_allclose(energy, energy_target, atol=0.0, rtol=rtol_e)
+        np.testing.assert_allclose(forces, forces_target @ ortho, atol=0.0, rtol=rtol_f)
+
+        stress_target = jnp.einsum("ab,aA,bB->AB", stress_target, ortho, ortho)
+        np.testing.assert_allclose(stress, stress_target, atol=0.0, rtol=2e-3)

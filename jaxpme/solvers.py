@@ -32,10 +32,10 @@ def pme(potential, interpolation_nodes=4):
 
     rspace = partial(_rspace, potential)
 
-    def kspace(smearing, charges, inverse_cell, kgrid, kvectors, positions, volume):
+    def kspace(smearing, charges, reciprocal_cell, kgrid, kvectors, positions, volume):
         k2 = jax.lax.square(kvectors).sum(axis=-1)
 
-        mesh = compute_weights(inverse_cell, positions, kgrid)
+        mesh = compute_weights(reciprocal_cell.T / (2 * jnp.pi), positions, kgrid)
 
         rho_mesh = points_to_mesh(charges, kgrid, mesh)
         mesh_hat = jnp.fft.rfftn(rho_mesh, norm="backward", s=rho_mesh.shape)

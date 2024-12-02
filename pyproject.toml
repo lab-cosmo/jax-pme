@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "jaxpme"
 version = "0.1.0"
-description = "torch-pme but in jax"
+description = "(Particle Mesh) Ewald summation in JAX"
 authors = ["Marcel Langer <dev@marcel.science>"]
 license = "MIT"
 

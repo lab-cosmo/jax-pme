@@ -107,7 +107,7 @@ def PME(
         atom_mask=None,
         pair_mask=None,
     ):
-        inverse_cell = jnp.linalg.inv(cell)
+        reciprocal_cell = get_reciprocal(cell)
 
         r = get_distances(cell, positions[i], positions[j], cell_shifts)
         if pair_mask is not None:
@@ -115,19 +115,18 @@ def PME(
 
         volume = jnp.abs(jnp.linalg.det(cell))
         kvectors = generate_kvectors(
-            inverse_cell.T * 2 * jnp.pi,
+            reciprocal_cell,
             k_grid.shape,
             dtype=positions.dtype,
             for_ewald=False,
         )
-
 
         if atom_mask is not None:
             charges *= atom_mask
 
         rspace = solver.rspace(smearing, charges, r, i, j)
         kspace = solver.kspace(
-            smearing, charges, inverse_cell, k_grid, kvectors, positions, volume
+            smearing, charges, reciprocal_cell, k_grid, kvectors, positions, volume
         )
 
         potentials = rspace + kspace

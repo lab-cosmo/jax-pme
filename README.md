@@ -93,7 +93,7 @@ The *low-level* API is not yet ready for public consumption. We split the calcul
 
 We find in benchmarks that for moderately-sized systems up to a few thousand atoms, the asymptotically less efficient `Ewald` method works best. For large systems, `PME` is preferable, as it scales $O(N \log N)$. **Note that PME is not smooth in the forces -- be careful when using it for dynamics**. The P3M method, which fixes this and is also more accurate, will be implemented soon.
 
-It is *highly* recommended to tune convergence parameters for your specific system. `torchpme.utils.tune_ewald` (and its `pme` version) exists for this purpose. Paramters can be used directly in `jax-pme`. You should typically tune the parameters for the larges system in a given dataset.
+It is *highly* recommended to tune convergence parameters for your specific system. `torchpme.utils.tune_ewald` (and its `pme` version) exists for this purpose. Paramters can be used directly in `jax-pme`. You should typically tune the parameters for the largest system in a given dataset.
 
 ## Development
 

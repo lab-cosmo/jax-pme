@@ -1,22 +1,17 @@
 import numpy as np
 import jax
+import jax.numpy as jnp
 
 import math
 import os
 
 import pytest
-
-jax.config.update("jax_enable_x64", True)
-
-import jax.numpy as jnp
-
 from ase import Atoms
-
-# Imports for random structure
 from ase.io import read
 
 from jaxpme import PME, Ewald
 
+jax.config.update("jax_enable_x64", True)
 DTYPE = jnp.float64
 
 

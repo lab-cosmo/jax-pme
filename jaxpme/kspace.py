@@ -10,19 +10,20 @@ def get_reciprocal(cell):
 
 
 def get_kgrid_ewald(cell, lr_wavelength):
-    # copied from torch-pme -- don't understand why
+    # todo: don't understand why this is not using reciprocal lattice
     ns = jnp.ceil(jnp.linalg.norm(cell, axis=-1) / lr_wavelength)
 
     shape = (int(ns[0]), int(ns[1]), int(ns[2]))
 
     # in principle, ShapeDtypeStruct would suffice here, but this
-    # does not play well with batching -- you can't reshape...
+    # does not play well with batching -- it can't be reshaped
     return jnp.ones(shape)
 
 
 def get_kgrid_mesh(cell, mesh_spacing):
     start = jnp.array(get_kgrid_ewald(cell, mesh_spacing).shape)
     actual = 2 * start + 1
+    # todo: revisit need for padding to powers of 2
     ns = jnp.array(2) ** (jnp.ceil(jnp.log2(actual)))
 
     shape = (int(ns[0]), int(ns[1]), int(ns[2]))
@@ -50,7 +51,6 @@ def generate_kvectors(reciprocal_cell, shape, for_ewald=True, dtype=jnp.float32)
             ..., None
         ]
 
-    # then take the cartesian product
     result = kxs[:, None, None] + kys[None, :, None] + kzs[None, None, :]
 
     if for_ewald:

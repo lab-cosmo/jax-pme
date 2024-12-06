@@ -8,6 +8,26 @@ Potential = namedtuple("Potential", ("sr", "lr", "correction"))
 
 
 def potential(exponent=1, exclusion_radius=None, custom_potential=None):
+    # potential: higher-level interface to be consumed by solvers
+    #
+    # This instantiates a bundle of functions that evaluate a potential
+    # in both real (.sr) and reciprocal (.lr) space, with corrections
+    # for self-interactions and background charges (.correction).
+    #
+    # For low-level implementations of the physical potentials see below;
+    # this is the common functionality, including the removal of all contributions
+    # from inside the exclusion_radius (commonly the real-space cutoff).
+    #
+    # We have draft support for custom potentials: Anything that implements the
+    # RawPotential interface (see below) can be wrapped in this Potential interface
+    # and pushed through solvers and then calculators.
+    #
+    # Note that we careful to mask out zero distance r and |k|**2 to avoid NaNs,
+    # even in the backward pass, see https://github.com/jax-ml/jax/issues/1052.
+    #
+    # We do this here to keep the raw potentials simple: We can just write out
+    # the actual formulas like 1/r and not worry about details like this.
+
     if custom_potential is None:
         if exponent == 1:
             pot = coulomb()

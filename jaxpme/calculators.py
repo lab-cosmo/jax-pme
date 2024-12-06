@@ -8,6 +8,18 @@ from .potentials import potential
 from .solvers import ewald, pme
 from .utils import atoms_to_graph, get_distances
 
+# calculators: high-level interface
+#
+# As discussed in the readme, the main user-facing part of this library is defined here:
+# Different Calculators that expose a prepare function, which puts inputs together, and
+# various compute functions that consume these inputs. They are all derived from the
+# potentials_fn, which computes the potential at each position. All compute functions
+# are fully compatible with JAX function transformations.
+#
+# For now, we accept some duplication between Ewald and PME to avoid overly abstracting
+# too early. This will be revisited later; we could probably use plain classes here.
+#
+# Thus:
 Calculator = namedtuple(
     "Calculator",
     ("prepare", "potentials", "energy", "energy_forces", "energy_forces_stress"),
@@ -15,7 +27,6 @@ Calculator = namedtuple(
 
 
 def Ewald(exponent=1, exclusion_radius=None, prefactor=1.0, custom_potential=None):
-    # instantiate here so we have access in the prepare_fn (not used yet)
     pot = potential(
         exponent=exponent,
         exclusion_radius=exclusion_radius,
@@ -87,7 +98,6 @@ def PME(
     interpolation_nodes=4,
     custom_potential=None,
 ):
-    # instantiate here so we have access in the prepare_fn (not used yet)
     pot = potential(
         exponent=exponent,
         exclusion_radius=exclusion_radius,

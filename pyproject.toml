@@ -1,23 +1,22 @@
 [tool.poetry]
-name = "jaxpme"
-version = "0.1.0"
+name = "jax-pme"
+version = "0.1.0-alpha.1"
 description = "(Particle Mesh) Ewald summation in JAX"
 authors = ["Marcel Langer <dev@marcel.science>"]
 license = "MIT"
+packages = [
+    {include = "jaxpme"}
+]
 
 [tool.poetry.dependencies]
 python = ">=3.7"
 vesin = "*"
-ase = "*"
+ase = ">=3.22.1"
 numpy = "*"
-pytest = "*"
-# e3x = "*"
-# comms =  { git = "https://github.com/sirmarcel/comms.git", branch = "main" }
-# PyYAML = "*"
-# jaxtyping = "*"
-# ruff = "*"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+ruff = "*"
 
 [build-system]
 requires = ["poetry-core"]
@@ -37,24 +36,17 @@ select = [
     # isort
     "I",
 ]
-typing-modules = ["jaxtyping"]
-
 # E741: don't worry about short variable names
 # E731: don't worry about lambdas
-# F722: jaxtyping+ruff problems, see https://github.com/astral-sh/ruff/issues/9860
-ignore = ["E741", "E731", "F722"]
+ignore = ["E741", "E731"]
 
 [tool.ruff.lint.isort]
-section-order = ["numpy", "jax", "future", "standard-library", "third-party", "typing", "first-party", "local-folder"]
+section-order = ["numpy", "jax", "future", "standard-library", "third-party", "first-party", "local-folder"]
 no-lines-before = ["jax"]
 
 [tool.ruff.lint.isort.sections]
 "numpy" = ["numpy"]
 "jax" = ["jax", "jax.numpy"]
-"typing" = ["jaxtyping", "typing"]
 
 
 [tool.ruff.lint.extend-per-file-ignores]
-# Also ignore `E402` in all `__init__.py` files.
-"test_ewald.py" = ["E402"]
-"md.py" = ["E501"]

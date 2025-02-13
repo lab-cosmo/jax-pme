@@ -20,13 +20,16 @@ Solver = namedtuple("Solver", ("rspace", "kspace"))
 
 
 # -- shared real-space part --
-def _rspace(potential, smearing, charges, r, i, j):
+def _rspace(potential, smearing, charges, r, i, j, full_neighbor_list=False):
     N = charges.shape[0]
 
     potentials_bare = potential.sr(smearing, r)
 
     pot = jax.ops.segment_sum(charges[j] * potentials_bare, i, num_segments=N)
-    pot += jax.ops.segment_sum(charges[i] * potentials_bare, j, num_segments=N)
+
+    if not full_neighbor_list:
+        # "reverse" pairs
+        pot += jax.ops.segment_sum(charges[i] * potentials_bare, j, num_segments=N)
 
     pot /= 2
 
@@ -36,12 +39,12 @@ def _rspace(potential, smearing, charges, r, i, j):
 # -- different solvers for reciprocal-space part --
 
 
-def pme(potential, interpolation_nodes=4):
+def pme(potential, interpolation_nodes=4, full_neighbor_list=False):
     from .mesh import lagrange
 
     compute_weights, points_to_mesh, mesh_to_points = lagrange(interpolation_nodes)
 
-    rspace = partial(_rspace, potential)
+    rspace = partial(_rspace, potential, full_neighbor_list=full_neighbor_list)
 
     def kspace(smearing, charges, reciprocal_cell, kgrid, kvectors, positions, volume):
         k2 = jax.lax.square(kvectors).sum(axis=-1)
@@ -64,8 +67,8 @@ def pme(potential, interpolation_nodes=4):
     return Solver(rspace, kspace)
 
 
-def ewald(potential):
-    rspace = partial(_rspace, potential)
+def ewald(potential, full_neighbor_list=False):
+    rspace = partial(_rspace, potential, full_neighbor_list=full_neighbor_list)
 
     def kspace(smearing, charges, kvectors, positions, volume):
         # kvectors : [k, 3]

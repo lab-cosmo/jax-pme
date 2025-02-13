@@ -26,13 +26,19 @@ Calculator = namedtuple(
 )
 
 
-def Ewald(exponent=1, exclusion_radius=None, prefactor=1.0, custom_potential=None):
+def Ewald(
+    exponent=1,
+    exclusion_radius=None,
+    prefactor=1.0,
+    custom_potential=None,
+    full_neighbor_list=False,
+):
     pot = potential(
         exponent=exponent,
         exclusion_radius=exclusion_radius,
         custom_potential=custom_potential,
     )
-    solver = ewald(pot)
+    solver = ewald(pot, full_neighbor_list=full_neighbor_list)
 
     def potentials_fn(
         charges,
@@ -45,12 +51,16 @@ def Ewald(exponent=1, exclusion_radius=None, prefactor=1.0, custom_potential=Non
         smearing,
         atom_mask=None,
         pair_mask=None,
+        distances=None,
     ):
         reciprocal_cell = get_reciprocal(cell)
 
-        r = get_distances(cell, positions[i], positions[j], cell_shifts)
-        if pair_mask is not None:
-            r *= pair_mask
+        if distances is None:
+            r = get_distances(cell, positions[i], positions[j], cell_shifts)
+            if pair_mask is not None:
+                r *= pair_mask
+        else:
+            r = distances
 
         volume = jnp.abs(jnp.linalg.det(cell))
         kvectors = generate_kvectors(
@@ -97,13 +107,16 @@ def PME(
     prefactor=1.0,
     interpolation_nodes=4,
     custom_potential=None,
+    full_neighbor_list=False,
 ):
     pot = potential(
         exponent=exponent,
         exclusion_radius=exclusion_radius,
         custom_potential=custom_potential,
     )
-    solver = pme(pot, interpolation_nodes=interpolation_nodes)
+    solver = pme(
+        pot, interpolation_nodes=interpolation_nodes, full_neighbor_list=full_neighbor_list
+    )
 
     def potentials_fn(
         charges,

@@ -10,7 +10,8 @@ def get_reciprocal(cell):
 
 
 def get_kgrid_ewald(cell, lr_wavelength):
-    # todo: don't understand why this is not using reciprocal lattice
+    # note: this seems odd, but is correct -- we have to consider the
+    #       real-space length of the wave vectors
     ns = jnp.ceil(jnp.linalg.norm(cell, axis=-1) / lr_wavelength)
 
     shape = (int(ns[0]), int(ns[1]), int(ns[2]))

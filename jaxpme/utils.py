@@ -2,14 +2,20 @@ import jax
 import jax.numpy as jnp
 
 
-def atoms_to_graph(atoms, cutoff):
+def atoms_to_graph(atoms, cutoff, full_list=False):
     import vesin
 
     positions = jnp.array(atoms.get_positions())
     cell = jnp.array(atoms.get_cell().array)
+    if atoms.get_pbc().all():
+        periodic = True
+    elif not atoms.get_pbc().any():
+        periodic = False
+    else:
+        raise ValueError("no mixed pbc supported")
 
-    nl = vesin.NeighborList(cutoff=cutoff, full_list=False)
-    i, j, S = nl.compute(points=positions, box=cell, periodic=True, quantities="ijS")
+    nl = vesin.NeighborList(cutoff=cutoff, full_list=full_list)
+    i, j, S = nl.compute(points=positions, box=cell, periodic=periodic, quantities="ijS")
 
     return cell, positions, i, j, S
 

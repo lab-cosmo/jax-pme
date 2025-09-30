@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from collections import namedtuple
 
 # -- high-level interface --
-Potential = namedtuple("Potential", ("sr", "lr", "correction"))
+Potential = namedtuple("Potential", ("sr", "lr", "real", "correction"))
 
 
 def potential(exponent=1, exclusion_radius=None, custom_potential=None):
@@ -60,6 +60,11 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
         masked = jnp.where(mask, 1e-6, k2)
         return jnp.where(mask, 0.0, pot.lr_k2(smearing, masked))
 
+    def real(r):
+        mask = r == 0
+        masked = jnp.where(mask, 1e-6, r)
+        return jnp.where(mask, 0.0, pot.real(masked))
+
     def correction(smearing, charges, volume):
         c = -charges * pot.correction_self(smearing)
 
@@ -69,12 +74,13 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
 
         return c
 
-    return Potential(sr, lr, correction)
+    return Potential(sr, lr, real, correction)
 
 
 # -- low-level implementation of potentials --
 RawPotential = namedtuple(
-    "RawPotential", ("sr_r", "lr_r", "lr_k2", "correction_background", "correction_self")
+    "RawPotential",
+    ("sr_r", "lr_r", "lr_k2", "real", "correction_background", "correction_self"),
 )
 
 
@@ -86,7 +92,10 @@ def coulomb():
         return jax.scipy.special.erf(r / (smearing * jnp.sqrt(2.0))) / r
 
     def sr_r(smearing, r):
-        return 1.0 / r - lr_r(smearing, r)
+        return real(r) - lr_r(smearing, r)
+
+    def real(r):
+        return 1.0 / r
 
     def correction_background(smearing):
         return jnp.pi * smearing**2
@@ -94,7 +103,7 @@ def coulomb():
     def correction_self(smearing):
         return jnp.sqrt(2.0 / jnp.pi) / smearing
 
-    return RawPotential(sr_r, lr_r, lr_k2, correction_background, correction_self)
+    return RawPotential(sr_r, lr_r, lr_k2, real, correction_background, correction_self)
 
 
 def inverse_power_law(exponent):
@@ -117,7 +126,10 @@ def inverse_power_law(exponent):
         return factor * gammainc(peff, x) / x**peff
 
     def sr_r(smearing, r):
-        return r ** (-exponent) - lr_r(smearing, r)
+        return real(r) - lr_r(smearing, r)
+
+    def real(r):
+        return r ** (-exponent)
 
     def correction_background(smearing):
         factor = jnp.pi**1.5 * (2 * smearing**2) ** ((3 - exponent) / 2)
@@ -128,4 +140,4 @@ def inverse_power_law(exponent):
         phalf = exponent / 2
         return 1 / gamma(phalf + 1) / (2 * smearing**2) ** phalf
 
-    return RawPotential(sr_r, lr_r, lr_k2, correction_background, correction_self)
+    return RawPotential(sr_r, lr_r, lr_k2, real, correction_background, correction_self)

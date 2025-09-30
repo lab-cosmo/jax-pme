@@ -80,12 +80,21 @@ def Ewald(
 
         return prefactor * potentials
 
-    def prepare_fn(atoms, charges, cutoff, lr_wavelength, smearing):
+    def prepare_fn(atoms, charges, cutoff, lr_wavelength=None, smearing=None):
         from .kspace import get_kgrid_ewald
 
-        # todo: insert tuning logic
+        if lr_wavelength is None:
+            lr_wavelength = cutoff / 8.0
 
-        graph = atoms_to_graph(atoms, cutoff)
+        if smearing is None:
+            smearing = cutoff / 4.0
+
+        graph = atoms_to_graph(atoms, cutoff, full_list=full_neighbor_list)
+
+        if charges is None:
+            c = atoms.get_initial_charges()
+            if (c != 0.0).any():
+                charges = c
 
         if charges is None:
             charges = jnp.array([-1.0, 1.0])

@@ -11,14 +11,9 @@ def test_reference_structures(cutoff):
     structures = read("reference_structures/coulomb_test_frames.xyz", index=":")
     atoms_no_pbc = structures[-1].copy()
     atoms_no_pbc.set_pbc(False)
-    charges_no_pbc = atoms_no_pbc.get_initial_charges()
-
-    charges = [atoms.get_initial_charges() for atoms in structures]
 
     calculator = Ewald(prefactor=1.0)
-    batch = calculator.prepare(
-        structures + [atoms_no_pbc], charges + [charges_no_pbc], cutoff
-    )
+    batch = calculator.prepare(structures + [atoms_no_pbc], None, cutoff)
     atom_to_system = batch[5]
     potentials = calculator.potentials(*batch)
 
@@ -30,12 +25,12 @@ def test_reference_structures(cutoff):
     inputs = [
         calc.prepare(
             atoms,
-            ch,
+            None,
             cutoff,
             cutoff / 8,
             cutoff / 4,
         )
-        for atoms, ch in zip(structures, charges)
+        for atoms in structures
     ]
 
     for i in range(len(structures)):

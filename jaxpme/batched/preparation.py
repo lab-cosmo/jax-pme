@@ -12,13 +12,7 @@ def prepare(atoms, cutoff, charges=None, lr_wavelength=None, smearing=None):
     graph = atoms_to_graph(atoms, cutoff, full_list=True)
 
     if charges is None:
-        c = atoms.get_initial_charges()
-        if (c != 0.0).any():
-            charges = c
-
-    if charges is None:
-        charges = np.array([-1.0, 1.0])
-        charges = np.tile(charges, len(atoms) // 2)
+        charges = atoms.get_initial_charges()
 
     if lr_wavelength is None:
         lr_wavelength = cutoff / 8.0

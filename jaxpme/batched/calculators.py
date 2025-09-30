@@ -97,31 +97,20 @@ def Ewald(
         from .preparation import prepare
 
         if chargess is None:
-            return to_batch(
-                [
-                    prepare(
-                        atoms,
-                        cutoff,
-                        charges=None,
-                        lr_wavelength=lr_wavelength,
-                        smearing=smearing,
-                    )
-                    for atoms in atomss
-                ]
-            )
-        else:
-            return to_batch(
-                [
-                    prepare(
-                        atoms,
-                        cutoff,
-                        charges=charges,
-                        lr_wavelength=lr_wavelength,
-                        smearing=smearing,
-                    )
-                    for (atoms, charges) in zip(atomss, chargess)
-                ]
-            )
+            chargess = [None] * len(atomss)
+
+        return to_batch(
+            [
+                prepare(
+                    atoms,
+                    cutoff,
+                    charges=charges,
+                    lr_wavelength=lr_wavelength,
+                    smearing=smearing,
+                )
+                for (atoms, charges) in zip(atomss, chargess)
+            ]
+        )
 
     def energy_fn(*args):
         cell = args[0]

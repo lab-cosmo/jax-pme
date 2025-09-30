@@ -92,14 +92,7 @@ def Ewald(
         graph = atoms_to_graph(atoms, cutoff, full_list=full_neighbor_list)
 
         if charges is None:
-            c = atoms.get_initial_charges()
-            if (c != 0.0).any():
-                charges = c
-
-        if charges is None:
-            charges = jnp.array([-1.0, 1.0])
-            charges = jnp.tile(charges, len(atoms) // 2)
-
+            charges = atoms.get_initial_charges()
         else:
             charges = jnp.array(charges).flatten()
 

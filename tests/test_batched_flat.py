@@ -6,7 +6,7 @@ from ase.io import read
 
 @pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
 def test_reference_structures(cutoff):
-    from jaxpme.batched.calculators import Ewald
+    from jaxpme.batched_flat.calculators import Ewald
 
     structures = read("reference_structures/coulomb_test_frames.xyz", index=":")
     atoms_no_pbc = structures[-1].copy()
@@ -45,7 +45,7 @@ def test_reference_structures(cutoff):
 
 @pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
 def test_mixed(cutoff):
-    from jaxpme.batched.calculators import Ewald
+    from jaxpme.batched_flat.calculators import Ewald
 
     atoms = read("reference_structures/coulomb_test_frames.xyz", index="0")
     charges = atoms.get_initial_charges()

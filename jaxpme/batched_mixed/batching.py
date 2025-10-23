@@ -44,6 +44,7 @@ def get_batch(
     num_pairs=None,
     num_pairs_nonpbc=None,
     num_k=None,
+    strategy="powers_of_2",
 ):
     _num_systems = len(samples)
     _num_atoms = []
@@ -52,7 +53,8 @@ def get_batch(
     _is_pbc = []
     _num_k = []
 
-    for charges, structure, (_, lr) in samples:
+    for structure in samples:
+        lr = structure["lr"]
         _num_atoms.append(len(structure["positions"]))
         _num_pairs.append(len(structure["centers"]))
         if hasattr(lr, "k_grid"):
@@ -116,7 +118,8 @@ def get_batch(
     nonpbc_offset = 0
     pbc_idx = 0
 
-    for idx, (_charges, structure, (_smearing, lr)) in enumerate(samples):
+    for idx, structure in enumerate(samples):
+        lr = structure["lr"]
         is_periodic = hasattr(lr, "k_grid")
 
         num_n = len(structure["positions"])
@@ -125,7 +128,7 @@ def get_batch(
         atom_slice = slice(atom_offset, atom_offset + num_n)
         pair_slice = slice(pair_offset, pair_offset + num_p)
 
-        charges[atom_slice] = _charges
+        charges[atom_slice] = structure["charges"]
         positions[atom_slice] = structure["positions"]
         cell[idx] = structure["cell"]
         centers[pair_slice] = structure["centers"] + atom_offset
@@ -140,7 +143,7 @@ def get_batch(
 
         if is_periodic:
             pbc_mask[idx] = True
-            smearing[idx] = _smearing
+            smearing[idx] = structure["smearing"]
             pbc_system_to_system[pbc_idx] = idx
             pbc_atom_to_atom[pbc_idx, :num_n] = np.arange(atom_offset, atom_offset + num_n)
 
@@ -203,15 +206,21 @@ def prepare(atoms, cutoff, charges=None, lr_wavelength=None, smearing=None):
     if charges is None:
         charges = atoms.get_initial_charges()
 
+    structure["charges"] = charges
+
     if lr_wavelength is None:
         lr_wavelength = cutoff / 8.0
 
     if smearing is None:
         smearing = cutoff / 4.0
 
-    lr = to_lr(atoms, structure, lr_wavelength, smearing)
+    smearing, lr = to_lr(atoms, structure, lr_wavelength, smearing)
 
-    return charges, structure, lr
+    structure["lr"] = lr
+    if smearing is not None:
+        structure["smearing"] = smearing
+
+    return structure
 
 
 def to_lr(atoms, structure, lr_wavelength, smearing):
@@ -275,35 +284,59 @@ def to_structure(atoms, cutoff):
     return structure
 
 
-def get_size(proposed, actual):
+def get_size(proposed, actual, strategy="powers_of_2"):
     if proposed is not None:
         assert proposed > actual
         return proposed
     else:
-        return _get_size(actual + 1)
+        return _get_size(actual + 1, strategy=strategy)
 
 
-def _get_size(n):
-    if n <= 32:
-        return next_multiple(n, 4)
+def _get_size(n, strategy="powers_of_2"):
+    if strategy == "powers_of_2":
+        # return next largest power of 2
+        return (2 ** np.ceil(np.log2(n))).astype(int)
+    elif strategy == "multiples":
+        if n <= 32:
+            return next_multiple(n, 4)
 
-    if n <= 64:
-        return next_multiple(n, 16)
+        if n <= 64:
+            return next_multiple(n, 16)
 
-    if n <= 256:
-        return next_multiple(n, 64)
+        if n <= 256:
+            return next_multiple(n, 64)
 
-    if n <= 1024:
-        return next_multiple(n, 256)
+        if n <= 1024:
+            return next_multiple(n, 256)
 
-    if n <= 4096:
-        return next_multiple(n, 1024)
+        if n <= 4096:
+            return next_multiple(n, 1024)
 
-    if n <= 32768:
-        return next_multiple(n, 4096)
+        if n <= 32768:
+            return next_multiple(n, 4096)
 
-    return next_multiple(n, 16384)
+        return next_multiple(n, 16384)
 
 
 def next_multiple(val, n):
     return n * (1 + int(val // n))
+
+
+## test ##
+
+
+assert (
+    _get_size(
+        13,
+        strategy="powers_of_2",
+    )
+    == 16
+)
+
+assert (
+    _get_size(
+        11,
+        strategy="multiples",
+    )
+    == 12
+)

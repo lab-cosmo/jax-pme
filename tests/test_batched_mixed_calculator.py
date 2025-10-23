@@ -1,19 +1,16 @@
 import numpy as np
 import jax
-import jax.numpy as jnp
 
 import pytest
-from ase import Atoms
 from ase.io import read
-from ase.build import molecule, bulk
 
 jax.config.update("jax_enable_x64", True)
 
 
 @pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
 def test_reference_structures(cutoff):
-    """Test calculator with multiple structures including periodic and non-periodic systems."""
-    from jaxpme.batched_mixed.calculator import Ewald
+    """Test calculator with multiple structures w/ pbc and no-pbc systems."""
+    from jaxpme.batched_mixed.calculators import Ewald
     from jaxpme.calculators import Ewald as SerialEwald
 
     structures = read("reference_structures/coulomb_test_frames.xyz", index=":")
@@ -56,7 +53,7 @@ def test_reference_structures(cutoff):
 @pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
 def test_mixed(cutoff):
     """Test calculator with mixed periodic and non-periodic systems."""
-    from jaxpme.batched_mixed.calculator import Ewald
+    from jaxpme.batched_mixed.calculators import Ewald
 
     atoms = read("reference_structures/coulomb_test_frames.xyz", index="0")
     charges = atoms.get_initial_charges()
@@ -78,16 +75,13 @@ def test_mixed(cutoff):
         charges_batch, sr_batch, nonperiodic_batch, periodic_batch
     )
 
-    np.testing.assert_allclose(
-        potentials[atom_to_system == 1], reference_potentials
-    )
+    np.testing.assert_allclose(potentials[atom_to_system == 1], reference_potentials)
 
 
 @pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
 def test_single_periodic_system(cutoff):
     """Test calculator with a single periodic system."""
-    from jaxpme.batched_mixed.calculator import Ewald
-    from jaxpme.batched_mixed.batching import get_batch, prepare
+    from jaxpme.batched_mixed.calculators import Ewald
     from jaxpme.calculators import Ewald as SerialEwald
 
     atoms = read("reference_structures/coulomb_test_frames.xyz", index="0")

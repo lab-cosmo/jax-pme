@@ -1,10 +1,11 @@
 import numpy as np
 
+
 def test_batching():
     """Test end-to-end batching with mixed periodic/non-periodic systems."""
-    from ase.build import molecule, bulk
+    from ase.build import bulk, molecule
 
-    from jaxpme.batched_mixed.batching import prepare, get_batch
+    from jaxpme.batched_mixed.batching import get_batch, prepare
 
     h2o = molecule("H2O")
     h2o.set_initial_charges([0.4, -0.8, 0.4])
@@ -16,9 +17,7 @@ def test_batching():
 
     systems = [h2o, nacl]
     samples = []
-    for atoms in systems:
-        charges, structure, lr = prepare(atoms, cutoff)
-        samples.append((charges, structure, lr))
+    samples = [prepare(atoms, cutoff) for atoms in systems]
 
     charges, sr_batch, nonperiodic_batch, periodic_batch = get_batch(samples)
 
@@ -62,7 +61,7 @@ def test_two_systems_sanity():
     """Sanity check that batching two identical systems gives expected results."""
     from ase.build import molecule
 
-    from jaxpme.batched_mixed.batching import prepare, get_batch
+    from jaxpme.batched_mixed.batching import get_batch, prepare
 
     h2o_1 = molecule("H2O")
     h2o_1.set_initial_charges([0.4, -0.8, 0.4])
@@ -73,10 +72,7 @@ def test_two_systems_sanity():
 
     cutoff = 2.0
     systems = [h2o_1, h2o_2]
-    samples = []
-    for atoms in systems:
-        charges, structure, lr = prepare(atoms, cutoff)
-        samples.append((charges, structure, lr))
+    samples = [prepare(atoms, cutoff) for atoms in systems]
 
     charges, sr_batch, nonperiodic_batch, periodic_batch = get_batch(samples)
 
@@ -94,8 +90,8 @@ def test_two_systems_sanity():
 
     # Verify total charge is neutral
     total_charge = 0
-    for charges, _, _ in samples:
-        total_charge += charges.sum()
+    for structure in samples:
+        total_charge += structure["charges"].sum()
     assert abs(total_charge) < 1e-10
 
     assert nonperiodic_batch.pair_mask.sum() > 0
@@ -114,13 +110,12 @@ def test_padding():
     """Test that padding works correctly."""
     from ase.build import molecule
 
-    from jaxpme.batched_mixed.batching import prepare, get_batch
+    from jaxpme.batched_mixed.batching import get_batch, prepare
 
     h2 = molecule("H2")
     h2.set_initial_charges([0.5, -0.5])
 
-    charges, structure, lr = prepare(h2, cutoff=2.0)
-    samples = [(charges, structure, lr)]
+    samples = [prepare(h2, cutoff=2.0)]
 
     charges, sr_batch, nonperiodic_batch, periodic_batch = get_batch(
         samples, num_systems=8, num_atoms=16, num_pairs=32, num_pairs_nonpbc=8

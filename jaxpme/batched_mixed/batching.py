@@ -200,13 +200,10 @@ def get_batch(
     return charges, sr_batch, nonperiodic_batch, periodic_batch
 
 
-def prepare(atoms, cutoff, charges=None, lr_wavelength=None, smearing=None):
+def prepare(atoms, cutoff, lr_wavelength=None, smearing=None):
     structure = to_structure(atoms, cutoff)
 
-    if charges is None:
-        charges = atoms.get_initial_charges()
-
-    structure["charges"] = charges
+    structure["charges"] = atoms.get_initial_charges()
 
     if lr_wavelength is None:
         lr_wavelength = cutoff / 8.0

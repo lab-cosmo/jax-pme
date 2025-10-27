@@ -101,22 +101,18 @@ def Ewald(
 
         return real_space + k_space
 
-    def prepare_fn(atomss, chargess, cutoff, lr_wavelength=None, smearing=None):
+    def prepare_fn(atomss, cutoff, lr_wavelength=None, smearing=None):
         from .batching import get_batch, prepare
-
-        if chargess is None:
-            chargess = [None] * len(atomss)
 
         return get_batch(
             [
                 prepare(
                     atoms,
                     cutoff,
-                    charges=charges,
                     lr_wavelength=lr_wavelength,
                     smearing=smearing,
                 )
-                for (atoms, charges) in zip(atomss, chargess)
+                for atoms in atomss
             ]
         )
 

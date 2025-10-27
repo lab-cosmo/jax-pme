@@ -32,13 +32,13 @@ def Ewald(
     ):
         N_all = charges.shape[0]
 
-        pbc_mask = batch.pbc_mask[batch.atom_to_system]
+        pbc_mask = batch.pbc_mask[batch.atom_to_structure]
 
         charges *= batch.atom_mask
 
         if batch.distances is None:
             r = get_distances(
-                batch.cell[batch.pair_to_system],
+                batch.cell[batch.pair_to_structure],
                 batch.positions[batch.centers],
                 batch.positions[batch.others],
                 batch.cell_shifts,
@@ -69,7 +69,7 @@ def Ewald(
         # real-space, pbc
         real_space += (
             solver.rspace(
-                batch.smearing[batch.pair_to_system],
+                batch.smearing[batch.pair_to_structure],
                 charges,
                 r,
                 batch.centers,
@@ -81,14 +81,14 @@ def Ewald(
 
         # k-space, pbc
 
-        cell = batch.cell[batch_pbc.system_to_system]
+        cell = batch.cell[batch_pbc.structure_to_structure]
         reciprocal_cell = jax.vmap(get_reciprocal)(cell)
         volume = jax.vmap(get_volume)(cell)
 
         kvectors = jax.vmap(generate_ewald_kvectors)(reciprocal_cell, batch_pbc.k_grid)
 
         k_space = jax.vmap(solver.kspace)(
-            batch.smearing[batch_pbc.system_to_system],
+            batch.smearing[batch_pbc.structure_to_structure],
             charges[batch_pbc.atom_to_atom],
             kvectors,
             batch.positions[batch_pbc.atom_to_atom],
@@ -127,9 +127,9 @@ def Ewald(
 
         return (
             jax.ops.segment_sum(
-                energies, batch.atom_to_system, num_segments=batch.cell.shape[0]
+                energies, batch.atom_to_structure, num_segments=batch.cell.shape[0]
             )
-            * batch.system_mask
+            * batch.structure_mask
         )
 
     def energy_and_forces_fn(
@@ -174,11 +174,11 @@ def Ewald(
         stress = (
             jax.ops.segment_sum(
                 jnp.einsum("ia,ib->iab", batch.positions, batch_grads.positions),
-                batch.atom_to_system,
+                batch.atom_to_structure,
                 num_segments=batch.cell.shape[0],
             )
             + jnp.einsum("sAa,sAb->sab", batch.cell, batch_grads.cell)
-        ) * batch.system_mask[:, None, None]
+        ) * batch.structure_mask[:, None, None]
 
         return energy, forces, stress
 

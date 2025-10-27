@@ -2,7 +2,7 @@ import numpy as np
 
 
 def test_batching():
-    """Test end-to-end batching with mixed periodic/non-periodic systems."""
+    """Test end-to-end batching with mixed periodic/non-periodic structures."""
     from ase.build import bulk, molecule
 
     from jaxpme.batched_mixed.batching import get_batch, prepare
@@ -15,15 +15,15 @@ def test_batching():
 
     cutoff = 3.0
 
-    systems = [h2o, nacl]
+    structures = [h2o, nacl]
     samples = []
-    samples = [prepare(atoms, cutoff) for atoms in systems]
+    samples = [prepare(atoms, cutoff) for atoms in structures]
 
     charges, sr_batch, nonperiodic_batch, periodic_batch = get_batch(samples)
 
     total_atoms = len(h2o) + len(nacl)
     assert sr_batch.atom_mask.sum() == total_atoms
-    assert sr_batch.system_mask.sum() == 2
+    assert sr_batch.structure_mask.sum() == 2
 
     # Verify positions for H2O
     h2o_pos_batch = sr_batch.positions[: len(h2o)]
@@ -34,10 +34,10 @@ def test_batching():
     assert np.allclose(nacl_pos_batch, nacl.get_positions())
 
     # Verify periodic and non-periodic batches
-    assert periodic_batch.system_mask.sum() == 1
+    assert periodic_batch.structure_mask.sum() == 1
     assert nonperiodic_batch.pair_mask.sum() > 0
 
-    # Verify periodic system indexing
+    # Verify periodic structure indexing
     pbc_idx = 0
     atom_indices = periodic_batch.atom_to_atom[pbc_idx]
     atom_indices = atom_indices[periodic_batch.atom_mask[pbc_idx]]
@@ -45,20 +45,20 @@ def test_batching():
     nacl_positions_from_batch = sr_batch.positions[atom_indices]
     assert np.allclose(nacl_positions_from_batch, nacl.get_positions())
 
-    # Verify atom_to_system and pair_to_system
-    assert sr_batch.atom_to_system[: len(h2o)].sum() == 0  # H2O is system 0
-    assert sr_batch.atom_to_system[len(h2o) : total_atoms].sum() == len(
+    # Verify atom_to_structure and pair_to_structure
+    assert sr_batch.atom_to_structure[: len(h2o)].sum() == 0  # H2O is structure 0
+    assert sr_batch.atom_to_structure[len(h2o) : total_atoms].sum() == len(
         nacl
-    )  # NaCl is system 1
+    )  # NaCl is structure 1
 
-    h2o_pairs = sr_batch.pair_mask & (sr_batch.pair_to_system == 0)
-    nacl_pairs = sr_batch.pair_mask & (sr_batch.pair_to_system == 1)
+    h2o_pairs = sr_batch.pair_mask & (sr_batch.pair_to_structure == 0)
+    nacl_pairs = sr_batch.pair_mask & (sr_batch.pair_to_structure == 1)
     assert h2o_pairs.sum() > 0
     assert nacl_pairs.sum() > 0
 
 
-def test_two_systems_sanity():
-    """Sanity check that batching two identical systems gives expected results."""
+def test_two_structures_sanity():
+    """Sanity check that batching two identical structures gives expected results."""
     from ase.build import molecule
 
     from jaxpme.batched_mixed.batching import get_batch, prepare
@@ -71,14 +71,14 @@ def test_two_systems_sanity():
     h2o_2.set_initial_charges([0.4, -0.8, 0.4])
 
     cutoff = 2.0
-    systems = [h2o_1, h2o_2]
-    samples = [prepare(atoms, cutoff) for atoms in systems]
+    structures = [h2o_1, h2o_2]
+    samples = [prepare(atoms, cutoff) for atoms in structures]
 
     charges, sr_batch, nonperiodic_batch, periodic_batch = get_batch(samples)
 
     assert sr_batch.atom_mask.sum() == 6
-    assert sr_batch.system_mask.sum() == 2
-    assert periodic_batch.system_mask.sum() == 0
+    assert sr_batch.structure_mask.sum() == 2
+    assert periodic_batch.structure_mask.sum() == 0
 
     # Verify positions for the first H2O
     h2o_1_pos_batch = sr_batch.positions[:3]
@@ -96,14 +96,14 @@ def test_two_systems_sanity():
 
     assert nonperiodic_batch.pair_mask.sum() > 0
 
-    # Verify atom_to_system for both systems
-    assert np.all(sr_batch.atom_to_system[:3] == 0)  # First H2O
-    assert np.all(sr_batch.atom_to_system[3:6] == 1)  # Second H2O
+    # Verify atom_to_structure for both structures
+    assert np.all(sr_batch.atom_to_structure[:3] == 0)  # First H2O
+    assert np.all(sr_batch.atom_to_structure[3:6] == 1)  # Second H2O
 
-    # Verify pair_to_system
+    # Verify pair_to_structure
     valid_pairs = sr_batch.pair_mask
-    pair_systems = sr_batch.pair_to_system[valid_pairs]
-    assert np.all((pair_systems == 0) | (pair_systems == 1))
+    pair_structures = sr_batch.pair_to_structure[valid_pairs]
+    assert np.all((pair_structures == 0) | (pair_structures == 1))
 
 
 def test_padding():
@@ -118,18 +118,18 @@ def test_padding():
     samples = [prepare(h2, cutoff=2.0)]
 
     charges, sr_batch, nonperiodic_batch, periodic_batch = get_batch(
-        samples, num_systems=8, num_atoms=16, num_pairs=32, num_pairs_nonpbc=8
+        samples, num_structures=8, num_atoms=16, num_pairs=32, num_pairs_nonpbc=8
     )
 
-    assert len(sr_batch.system_mask) == 8
+    assert len(sr_batch.structure_mask) == 8
     assert len(sr_batch.atom_mask) == 16
     assert len(sr_batch.pair_mask) == 32
     assert len(nonperiodic_batch.pair_mask) == 8
 
-    assert sr_batch.system_mask.sum() == 1
+    assert sr_batch.structure_mask.sum() == 1
     assert sr_batch.atom_mask.sum() == 2
 
-    # Verify atom_to_system and pair_to_system for padding
-    padding_system = 7  # num_systems - 1
-    assert np.all(sr_batch.atom_to_system[~sr_batch.atom_mask] == padding_system)
-    assert np.all(sr_batch.pair_to_system[~sr_batch.pair_mask] == padding_system)
+    # Verify atom_to_structure and pair_to_structure for padding
+    padding_structure = 7  # num_structures - 1
+    assert np.all(sr_batch.atom_to_structure[~sr_batch.atom_mask] == padding_structure)
+    assert np.all(sr_batch.pair_to_structure[~sr_batch.pair_mask] == padding_structure)

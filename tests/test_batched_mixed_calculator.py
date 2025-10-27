@@ -19,9 +19,9 @@ def test_reference_structures(cutoff):
 
     calculator = Ewald(prefactor=1.0)
     charges, sr_batch, nonperiodic_batch, periodic_batch = calculator.prepare(
-        structures + [atoms_no_pbc], None, cutoff
+        structures + [atoms_no_pbc], cutoff
     )
-    atom_to_system = sr_batch.atom_to_system
+    atom_to_structure = sr_batch.atom_to_structure
     potentials = calculator.potentials(charges, sr_batch, nonperiodic_batch, periodic_batch)
 
     E, F, S = calculator.energy_forces_stress(
@@ -44,9 +44,9 @@ def test_reference_structures(cutoff):
         pot = calc.potentials(*inputs[i])
         E2, F2, S2 = calc.energy_forces_stress(*inputs[i])
 
-        np.testing.assert_allclose(potentials[atom_to_system == i], pot)
+        np.testing.assert_allclose(potentials[atom_to_structure == i], pot)
         np.testing.assert_allclose(E[i], E2)
-        np.testing.assert_allclose(F[atom_to_system == i], F2)
+        np.testing.assert_allclose(F[atom_to_structure == i], F2)
         np.testing.assert_allclose(S[i], S2)
 
 
@@ -68,14 +68,14 @@ def test_mixed(cutoff):
 
     calculator = Ewald(prefactor=1.0)
     charges_batch, sr_batch, nonperiodic_batch, periodic_batch = calculator.prepare(
-        [atoms, atoms2], [charges, charges], cutoff
+        [atoms, atoms2], cutoff
     )
-    atom_to_system = sr_batch.atom_to_system
+    atom_to_structure = sr_batch.atom_to_structure
     potentials = calculator.potentials(
         charges_batch, sr_batch, nonperiodic_batch, periodic_batch
     )
 
-    np.testing.assert_allclose(potentials[atom_to_system == 1], reference_potentials)
+    np.testing.assert_allclose(potentials[atom_to_structure == 1], reference_potentials)
 
 
 @pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
@@ -89,7 +89,7 @@ def test_single_periodic_system(cutoff):
     # Calculate with batched calculator
     calculator = Ewald(prefactor=1.0)
     charges, sr_batch, nonperiodic_batch, periodic_batch = calculator.prepare(
-        [atoms], None, cutoff
+        [atoms], cutoff
     )
     potentials = calculator.potentials(charges, sr_batch, nonperiodic_batch, periodic_batch)
     energy = calculator.energy(charges, sr_batch, nonperiodic_batch, periodic_batch)

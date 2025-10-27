@@ -16,29 +16,29 @@ Batch = namedtuple(
         "smearing",
         "atom_mask",
         "pair_mask",
-        "system_mask",
+        "structure_mask",
         "pbc_mask",
-        "atom_to_system",
-        "pair_to_system",
+        "atom_to_structure",
+        "pair_to_structure",
     ),
 )
 Periodic = namedtuple(
     "Periodic",
-    ("k_grid", "atom_to_atom", "system_to_system", "atom_mask", "system_mask"),
+    ("k_grid", "atom_to_atom", "structure_to_structure", "atom_mask", "structure_mask"),
     # atom_to_atom: indices into SR batch positions [num_pbc, num_atoms_pbc]
     #               -> positions[atom_to_atom]
-    # system_to_system: indices into SR batch systems [num_pbc]
-    #                   -> cell[system_to_system]
-    # system_mask: mask for valid periodic systems [num_pbc]
-    #              -> True for real systems, False for padding
+    # structure_to_structure: indices into SR batch structures [num_pbc]
+    #                   -> cell[structure_to_structure]
+    # structure_mask: mask for valid periodic structures [num_pbc]
+    #              -> True for real structures, False for padding
 )
 NonPeriodic = namedtuple("NonPeriodic", ("centers", "others", "pair_mask"))
 
 
 def get_batch(
     samples,
-    num_systems=None,
-    num_systems_pbc=None,
+    num_structures=None,
+    num_structures_pbc=None,
     num_atoms=None,
     num_atoms_pbc=None,
     num_pairs=None,
@@ -46,7 +46,7 @@ def get_batch(
     num_k=None,
     strategy="powers_of_2",
 ):
-    _num_systems = len(samples)
+    _num_structures = len(samples)
     _num_atoms = []
     _num_pairs = []
     _num_pairs_nonpbc = []
@@ -77,29 +77,29 @@ def get_batch(
     _total_pairs_nonpbc = _num_pairs_nonpbc.sum() if len(_num_pairs_nonpbc) > 0 else 0
     _total_pbc = _is_pbc.sum()
 
-    num_systems = get_size(num_systems, _num_systems)
+    num_structures = get_size(num_structures, _num_structures)
     num_atoms = get_size(num_atoms, _total_atoms)
     num_pairs = get_size(num_pairs, _total_pairs)
     num_atoms_pbc = get_size(num_atoms_pbc, _max_atoms_pbc)
     num_k = get_size(num_k, _max_k)
     num_pairs_nonpbc = get_size(num_pairs_nonpbc, _total_pairs_nonpbc)
-    num_pbc = get_size(num_systems_pbc, _total_pbc)
+    num_pbc = get_size(num_structures_pbc, _total_pbc)
 
     padding_atom_idx = _total_atoms
-    padding_system_idx = num_systems - 1
+    padding_structure_idx = num_structures - 1
 
     charges = np.zeros(num_atoms, dtype=float)
     positions = np.zeros((num_atoms, 3), dtype=float)
-    cell = np.zeros((num_systems, 3, 3), dtype=float)
+    cell = np.zeros((num_structures, 3, 3), dtype=float)
     cell[:] = np.eye(3)
-    smearing = np.zeros(num_systems, dtype=float)
+    smearing = np.zeros(num_structures, dtype=float)
     centers = np.ones(num_pairs, dtype=int) * padding_atom_idx
     others = np.ones(num_pairs, dtype=int) * padding_atom_idx
     cell_shifts = np.zeros((num_pairs, 3), dtype=int)
-    atom_to_system = np.ones(num_atoms, dtype=int) * padding_system_idx
-    pair_to_system = np.ones(num_pairs, dtype=int) * padding_system_idx
-    system_mask = np.zeros(num_systems, dtype=bool)
-    pbc_mask = np.zeros(num_systems, dtype=bool)
+    atom_to_structure = np.ones(num_atoms, dtype=int) * padding_structure_idx
+    pair_to_structure = np.ones(num_pairs, dtype=int) * padding_structure_idx
+    structure_mask = np.zeros(num_structures, dtype=bool)
+    pbc_mask = np.zeros(num_structures, dtype=bool)
     atom_mask = np.zeros(num_atoms, dtype=bool)
     pair_mask = np.zeros(num_pairs, dtype=bool)
 
@@ -109,9 +109,9 @@ def get_batch(
 
     pbc_kgrid = np.zeros((num_pbc, num_k, 3), dtype=float)
     pbc_atom_to_atom = np.ones((num_pbc, num_atoms_pbc), dtype=int) * padding_atom_idx
-    pbc_system_to_system = np.ones(num_pbc, dtype=int) * padding_system_idx
+    pbc_structure_to_structure = np.ones(num_pbc, dtype=int) * padding_structure_idx
     pbc_atom_mask = np.zeros((num_pbc, num_atoms_pbc), dtype=bool)
-    pbc_system_mask = np.zeros(num_pbc, dtype=bool)
+    pbc_structure_mask = np.zeros(num_pbc, dtype=bool)
 
     atom_offset = 0
     pair_offset = 0
@@ -135,23 +135,23 @@ def get_batch(
         others[pair_slice] = structure["others"] + atom_offset
         cell_shifts[pair_slice] = structure["cell_shifts"]
 
-        atom_to_system[atom_slice] = idx
-        pair_to_system[pair_slice] = idx
-        system_mask[idx] = True
+        atom_to_structure[atom_slice] = idx
+        pair_to_structure[pair_slice] = idx
+        structure_mask[idx] = True
         atom_mask[atom_slice] = True
         pair_mask[pair_slice] = True
 
         if is_periodic:
             pbc_mask[idx] = True
             smearing[idx] = structure["smearing"]
-            pbc_system_to_system[pbc_idx] = idx
+            pbc_structure_to_structure[pbc_idx] = idx
             pbc_atom_to_atom[pbc_idx, :num_n] = np.arange(atom_offset, atom_offset + num_n)
 
             k_grid_shape = lr.k_grid.shape
             pbc_kgrid[pbc_idx] = generate_ewald_k_grid(k_grid_shape, size=num_k)
 
             pbc_atom_mask[pbc_idx, :num_n] = True
-            pbc_system_mask[pbc_idx] = True
+            pbc_structure_mask[pbc_idx] = True
             pbc_idx += 1
         else:
             num_nonpbc = len(lr.centers)
@@ -176,19 +176,19 @@ def get_batch(
         cell_shifts=cell_shifts,
         atom_mask=atom_mask,
         pair_mask=pair_mask,
-        system_mask=system_mask,
+        structure_mask=structure_mask,
         pbc_mask=pbc_mask,
-        atom_to_system=atom_to_system,
-        pair_to_system=pair_to_system,
+        atom_to_structure=atom_to_structure,
+        pair_to_structure=pair_to_structure,
         distances=None,
     )
 
     periodic_batch = Periodic(
         k_grid=pbc_kgrid,
         atom_to_atom=pbc_atom_to_atom,
-        system_to_system=pbc_system_to_system,
+        structure_to_structure=pbc_structure_to_structure,
         atom_mask=pbc_atom_mask,
-        system_mask=pbc_system_mask,
+        structure_mask=pbc_structure_mask,
     )
 
     nonperiodic_batch = NonPeriodic(
@@ -227,9 +227,9 @@ def to_lr(atoms, structure, lr_wavelength, smearing):
         return smearing, Periodic(
             k_grid=k_grid,
             atom_to_atom=None,
-            system_to_system=None,
+            structure_to_structure=None,
             atom_mask=None,
-            system_mask=None,
+            structure_mask=None,
         )
     elif not atoms.pbc.all():
         N = len(atoms)

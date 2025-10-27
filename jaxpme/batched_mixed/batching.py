@@ -77,13 +77,13 @@ def get_batch(
     _total_pairs_nonpbc = _num_pairs_nonpbc.sum() if len(_num_pairs_nonpbc) > 0 else 0
     _total_pbc = _is_pbc.sum()
 
-    num_structures = get_size(num_structures, _num_structures)
-    num_atoms = get_size(num_atoms, _total_atoms)
-    num_pairs = get_size(num_pairs, _total_pairs)
-    num_atoms_pbc = get_size(num_atoms_pbc, _max_atoms_pbc)
-    num_k = get_size(num_k, _max_k)
-    num_pairs_nonpbc = get_size(num_pairs_nonpbc, _total_pairs_nonpbc)
-    num_pbc = get_size(num_structures_pbc, _total_pbc)
+    num_structures = get_size(num_structures, _num_structures, strategy=strategy)
+    num_atoms = get_size(num_atoms, _total_atoms, strategy=strategy)
+    num_pairs = get_size(num_pairs, _total_pairs, strategy=strategy)
+    num_atoms_pbc = get_size(num_atoms_pbc, _max_atoms_pbc, strategy=strategy)
+    num_k = get_size(num_k, _max_k, strategy=strategy)
+    num_pairs_nonpbc = get_size(num_pairs_nonpbc, _total_pairs_nonpbc, strategy=strategy)
+    num_pbc = get_size(num_structures_pbc, _total_pbc, strategy=strategy)
 
     padding_atom_idx = _total_atoms
     padding_structure_idx = num_structures - 1
@@ -283,8 +283,15 @@ def to_structure(atoms, cutoff):
 
 def get_size(proposed, actual, strategy="powers_of_2"):
     if proposed is not None:
-        assert proposed > actual
-        return proposed
+        if isinstance(proposed, str):
+            return _get_size(actual + 1, strategy=proposed)
+        elif isinstance(proposed, int):
+            assert proposed > actual
+            return proposed
+        else:
+            msg = "could not determine size.\n"
+            msg += f"proposed: {proposed} actual: {actual} strategy: {strategy}"
+            raise ValueError(msg)
     else:
         return _get_size(actual + 1, strategy=strategy)
 
@@ -292,7 +299,13 @@ def get_size(proposed, actual, strategy="powers_of_2"):
 def _get_size(n, strategy="powers_of_2"):
     if strategy == "powers_of_2":
         # return next largest power of 2
-        return (2 ** np.ceil(np.log2(n))).astype(int)
+        result = 2 ** np.ceil(np.log2(n))
+    elif strategy == "powers_of_4":
+        # return next largest power of 4
+        result = 4 ** np.ceil(np.log(n) / np.log(4))
+    elif strategy == "powers_of_8":
+        # return next largest power of 8
+        result = 8 ** np.ceil(np.log(n) / np.log(8))
     elif strategy == "multiples":
         if n <= 32:
             return next_multiple(n, 4)
@@ -312,7 +325,11 @@ def _get_size(n, strategy="powers_of_2"):
         if n <= 32768:
             return next_multiple(n, 4096)
 
-        return next_multiple(n, 16384)
+        result = next_multiple(n, 16384)
+    else:
+        raise ValueError(f"sizing strategy {strategy} is not known")
+
+    return int(result)
 
 
 def next_multiple(val, n):
@@ -328,6 +345,14 @@ assert (
         strategy="powers_of_2",
     )
     == 16
+)
+
+assert (
+    _get_size(
+        33,
+        strategy="powers_of_4",
+    )
+    == 64
 )
 
 assert (

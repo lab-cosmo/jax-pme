@@ -306,6 +306,12 @@ def _get_size(n, strategy="powers_of_2"):
     elif strategy == "powers_of_8":
         # return next largest power of 8
         result = 8 ** np.ceil(np.log(n) / np.log(8))
+    elif strategy == "powers_of_16":
+        # return next largest power of 16
+        result = 16 ** np.ceil(np.log(n) / np.log(16))
+    elif strategy == "powers_of_32":
+        # return next largest power of 32
+        result = 32 ** np.ceil(np.log(n) / np.log(32))
     elif strategy == "multiples":
         if n <= 32:
             return next_multiple(n, 4)

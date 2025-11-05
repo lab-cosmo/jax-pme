@@ -95,10 +95,13 @@ def Ewald(
             volume,
         )
 
-        k_space = jax.ops.segment_sum(
-            k_space.flatten(), batch_pbc.atom_to_atom.flatten(), num_segments=N_all
+        k_space = (
+            jax.ops.segment_sum(
+                k_space.flatten(), batch_pbc.atom_to_atom.flatten(), num_segments=N_all
+            )
+            * batch.atom_mask
+            * pbc_mask
         )
-
         return real_space + k_space
 
     def prepare_fn(atomss, cutoff, lr_wavelength=None, smearing=None):

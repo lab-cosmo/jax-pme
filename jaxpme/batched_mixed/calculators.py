@@ -102,6 +102,7 @@ def Ewald(
             * batch.atom_mask
             * pbc_mask
         )
+
         return real_space + k_space
 
     def prepare_fn(atomss, cutoff, lr_wavelength=None, smearing=None):

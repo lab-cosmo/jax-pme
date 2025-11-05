@@ -92,7 +92,7 @@ def get_batch(
     positions = np.zeros((num_atoms, 3), dtype=float)
     cell = np.zeros((num_structures, 3, 3), dtype=float)
     cell[:] = np.eye(3)
-    smearing = np.zeros(num_structures, dtype=float)
+    smearing = np.ones(num_structures, dtype=float)
     centers = np.ones(num_pairs, dtype=int) * padding_atom_idx
     others = np.ones(num_pairs, dtype=int) * padding_atom_idx
     cell_shifts = np.zeros((num_pairs, 3), dtype=int)

@@ -24,6 +24,8 @@ def test_reference_structures(cutoff):
     atom_to_structure = sr_batch.atom_to_structure
     potentials = calculator.potentials(charges, sr_batch, nonperiodic_batch, periodic_batch)
 
+    np.testing.assert_(~np.isnan(potentials).any())
+
     E, F, S = calculator.energy_forces_stress(
         charges, sr_batch, nonperiodic_batch, periodic_batch
     )

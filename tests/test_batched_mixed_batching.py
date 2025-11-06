@@ -118,6 +118,7 @@ def test_padding():
     h2.set_cell(np.diag(diags))
     h2.set_pbc([True, True, True])
     lr_wavelength = 2.0
+
     samples = [prepare(h2, cutoff=2.0, lr_wavelength=lr_wavelength)]
 
     charges, sr_batch, nonperiodic_batch, periodic_batch = get_batch(

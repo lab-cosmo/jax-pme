@@ -114,8 +114,11 @@ def test_padding():
 
     h2 = molecule("H2")
     h2.set_initial_charges([0.5, -0.5])
-
-    samples = [prepare(h2, cutoff=2.0)]
+    diags = [7.0, 8.0, 9.0]
+    h2.set_cell(np.diag(diags))
+    h2.set_pbc([True, True, True])
+    lr_wavelength = 2.0
+    samples = [prepare(h2, cutoff=2.0, lr_wavelength=lr_wavelength)]
 
     charges, sr_batch, nonperiodic_batch, periodic_batch = get_batch(
         samples, num_structures=8, num_atoms=16, num_pairs=32, num_pairs_nonpbc=8
@@ -128,6 +131,14 @@ def test_padding():
 
     assert sr_batch.structure_mask.sum() == 1
     assert sr_batch.atom_mask.sum() == 2
+
+    # Lazy check to verify that all generated, non-padded k-vectors are different
+    total_kpoints = (
+        np.ceil(diags[0] / lr_wavelength)
+        * np.ceil(diags[1] / lr_wavelength)
+        * np.ceil(diags[2] / lr_wavelength)
+    )
+    assert total_kpoints == np.unique(periodic_batch.k_grid, axis=1).shape[1]
 
     # Verify atom_to_structure and pair_to_structure for padding
     padding_structure = 7  # num_structures - 1

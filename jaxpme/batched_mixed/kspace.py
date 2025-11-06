@@ -19,13 +19,14 @@ def generate_ewald_k_grid(shape, size=None):
 
     k_grid = np.zeros((size, 3), dtype=float)
 
-    # this is just a manual outer product: we want all combinations of x,y,z which
-    # we accomplish by systematically mixing tile and repeat
-    k_grid[:num_k, 0] = shape[0] * np.fft.fftfreq(shape[0]).repeat(shape[1] * shape[2])
-    k_grid[:num_k, 1] = np.tile(
-        shape[1] * np.fft.fftfreq(shape[1]).repeat(shape[0]), shape[2]
-    )
-    k_grid[:num_k, 2] = np.tile(shape[2] * np.fft.fftfreq(shape[2]), shape[0] * shape[1])
+    fx = np.fft.fftfreq(shape[0]) * shape[0]
+    fy = np.fft.fftfreq(shape[1]) * shape[1]
+    fz = np.fft.fftfreq(shape[2]) * shape[2]
+
+    kx, ky, kz = np.meshgrid(fx, fy, fz)
+    k_grid[:num_k, 0] = kx.reshape(-1)
+    k_grid[:num_k, 1] = ky.reshape(-1)
+    k_grid[:num_k, 2] = kz.reshape(-1)
 
     return k_grid
 

@@ -297,49 +297,53 @@ def get_size(proposed, actual, strategy="powers_of_2"):
 
 
 def _get_size(n, strategy="powers_of_2"):
-    if strategy == "powers_of_2":
-        # return next largest power of 2
-        result = 2 ** np.ceil(np.log2(n))
-    elif strategy == "powers_of_4":
-        # return next largest power of 4
-        result = 4 ** np.ceil(np.log(n) / np.log(4))
-    elif strategy == "powers_of_8":
-        # return next largest power of 8
-        result = 8 ** np.ceil(np.log(n) / np.log(8))
-    elif strategy == "powers_of_16":
-        # return next largest power of 16
-        result = 16 ** np.ceil(np.log(n) / np.log(16))
-    elif strategy == "powers_of_32":
-        # return next largest power of 32
-        result = 32 ** np.ceil(np.log(n) / np.log(32))
-    elif strategy == "multiples":
-        if n <= 32:
-            return next_multiple(n, 4)
+    if strategy == "multiples":
+        return multiples(n)
 
-        if n <= 64:
-            return next_multiple(n, 16)
+    prefix = "powers_of_"
+    if strategy.startswith(prefix):
+        exponent = int(strategy[len(prefix) :])
+        return next_power(n, exponent)
 
-        if n <= 256:
-            return next_multiple(n, 64)
+    prefix = "multiples_of_"
+    if strategy.startswith(prefix):
+        x = int(strategy[len(prefix) :])
+        return next_multiple(n, x)
 
-        if n <= 1024:
-            return next_multiple(n, 256)
-
-        if n <= 4096:
-            return next_multiple(n, 1024)
-
-        if n <= 32768:
-            return next_multiple(n, 4096)
-
-        result = next_multiple(n, 16384)
-    else:
-        raise ValueError(f"sizing strategy {strategy} is not known")
-
-    return int(result)
+    raise ValueError(f"unknown padding size strategy {strategy}")
 
 
 def next_multiple(val, n):
     return n * (1 + int(val // n))
+
+
+def next_power(val, x):
+    return int(x ** np.ceil(np.log(val) / np.log(x)))
+
+
+def multiples(val):
+    if val <= 32:
+        return next_multiple(val, 4)
+
+    if val <= 64:
+        return next_multiple(val, 16)
+
+    if val <= 256:
+        return next_multiple(val, 64)
+
+    if val <= 1024:
+        return next_multiple(val, 256)
+
+    if val <= 4096:
+        return next_multiple(val, 1024)
+
+    if val <= 32768:
+        return next_multiple(val, 4096)
+
+    if val <= 65536:
+        return next_multiple(val, 16384)
+
+    return next_power(val, 2)
 
 
 ## test ##
@@ -368,3 +372,128 @@ assert (
     )
     == 12
 )
+
+
+# ---------------------------------------------------------------------------
+# Incremental / generator-style batcher
+# ---------------------------------------------------------------------------
+
+
+def _sample_totals(sample):
+    """Compute basic count statistics for a single sample.
+
+    Returns a dict containing (non-prefixed) counts:
+      atoms: number of atoms in the structure
+      pairs: number of short-range neighbor pairs (centers)
+      pairs_nonpbc: number of long-range pairs for NonPeriodic samples
+      pbc: 1 if periodic, 0 otherwise
+
+    The caller is responsible for prefixing with 'total_' when aggregating.
+    """
+    lr = sample["lr"]
+    num_atoms = len(sample["positions"])
+    num_pairs = len(sample["centers"])
+    if hasattr(lr, "k_grid"):
+        num_pairs_nonpbc = 0
+        pbc = 1
+    else:
+        # NonPeriodic: lr.centers exists
+        num_pairs_nonpbc = len(lr.centers)
+        pbc = 0
+    return {
+        "atoms": num_atoms,
+        "pairs": num_pairs,
+        "pairs_nonpbc": num_pairs_nonpbc,
+        "pbc": pbc,
+    }
+
+
+def _empty_totals():
+    return {
+        "total_structures": 0,
+        "total_atoms": 0,
+        "total_pairs": 0,
+        "total_pairs_nonpbc": 0,
+        "total_pbc": 0,
+    }
+
+
+def _accumulate(totals, sample_counts):
+    """Return a NEW totals dict after adding sample_counts."""
+    new = dict(totals)  # shallow copy
+    new["total_structures"] += 1
+    new["total_atoms"] += sample_counts["atoms"]
+    new["total_pairs"] += sample_counts["pairs"]
+    new["total_pairs_nonpbc"] += sample_counts["pairs_nonpbc"]
+    new["total_pbc"] += sample_counts["pbc"]
+    return new
+
+
+def iter_batches_by_totals(samples, should_yield=None):
+    """Yield batches of samples guided by aggregate "total_*" size stats.
+
+    Parameters
+    ----------
+    samples : iterable
+        Iterable of prepared sample dicts (as produced by `prepare`).
+    should_yield : callable(next_stats, current_stats) -> bool, optional
+        Decision function consulted BEFORE adding the next sample. It receives:
+          next_stats: totals dict AS IF the next sample were added.
+          current_stats: current totals dict (state of the ongoing batch).
+        If it returns True, the current batch is yielded *before* the sample is
+        added, then a fresh batch starts.
+
+        If None, a default strategy that never yields early is used; all
+        samples appear in one batch.
+
+    Yields
+    ------
+    (batch, totals) : (list[dict], dict)
+        batch: list of sample dicts in the batch.
+        totals: final aggregate stats for the yielded batch.
+
+    Notes
+    -----
+    - This generator does not perform padding or allocation; it only groups
+      samples to make it easier to implement complex sizing / splitting logic.
+    - The separation of computing `next_stats` first allows sophisticated
+      threshold or heuristic logic (e.g., model-driven cost prediction) to be
+      implemented externally without making this loop more complex.
+    """
+    if should_yield is None:
+
+        def should_yield(_next, _current):  # type: ignore
+            return False
+
+    batch = []
+    current_totals = _empty_totals()
+
+    for sample in samples:
+        counts = _sample_totals(sample)
+        next_totals = _accumulate(current_totals, counts)
+
+        # Decide if we should flush BEFORE incorporating this sample.
+        if batch and should_yield(next_totals, current_totals):
+            # Yield current batch and reset.
+            yield batch, current_totals
+            batch = []
+            current_totals = _empty_totals()
+            # Recompute next_totals in the fresh context.
+            next_totals = _accumulate(current_totals, counts)
+
+        # Incorporate sample.
+        batch.append(sample)
+        current_totals = next_totals
+
+    if batch:
+        yield batch, current_totals
+
+
+def debug_total_stats(samples):
+    """Convenience helper: materialize batches with a trivial size strategy.
+
+    This is intended for quick interactive exploration; it simply consumes the
+    iterator and returns a list of (totals) for each batch (one batch if no
+    splitting occurs).
+    """
+    return [totals for _batch, totals in iter_batches_by_totals(samples)]

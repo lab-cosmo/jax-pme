@@ -314,6 +314,8 @@ def _get_size(n, strategy="powers_of_2"):
 
 
 def next_multiple(val, n):
+    if val <= 1:
+        return 2
     return n * (1 + int(val // n))
 
 

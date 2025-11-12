@@ -233,12 +233,11 @@ def to_lr(atoms, structure, lr_wavelength, smearing):
         )
     elif not atoms.pbc.all():
         N = len(atoms)
-        full_i = np.arange(N).repeat(N)
-        full_j = np.tile(np.arange(N), N)
+        j, i = np.triu_indices(N, k=1)
 
         return None, NonPeriodic(
-            centers=full_i,
-            others=full_j,
+            centers=i,
+            others=j,
             pair_mask=None,
         )
 

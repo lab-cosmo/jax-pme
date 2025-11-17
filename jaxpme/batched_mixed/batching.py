@@ -88,11 +88,13 @@ def get_batch(
     padding_atom_idx = _total_atoms
     padding_structure_idx = num_structures - 1
 
-    charges = np.zeros(num_atoms, dtype=float)
-    positions = np.zeros((num_atoms, 3), dtype=float)
-    cell = np.zeros((num_structures, 3, 3), dtype=float)
+    dtype = samples[0]["positions"].dtype
+
+    charges = np.zeros(num_atoms, dtype=dtype)
+    positions = np.zeros((num_atoms, 3), dtype=dtype)
+    cell = np.zeros((num_structures, 3, 3), dtype=dtype)
     cell[:] = np.eye(3)
-    smearing = np.ones(num_structures, dtype=float)
+    smearing = np.ones(num_structures, dtype=dtype)
     centers = np.ones(num_pairs, dtype=int) * padding_atom_idx
     others = np.ones(num_pairs, dtype=int) * padding_atom_idx
     cell_shifts = np.zeros((num_pairs, 3), dtype=int)
@@ -107,7 +109,7 @@ def get_batch(
     nonpbc_others = np.ones(num_pairs_nonpbc, dtype=int) * padding_atom_idx
     nonpbc_pair_mask = np.zeros(num_pairs_nonpbc, dtype=bool)
 
-    pbc_kgrid = np.zeros((num_pbc, num_k, 3), dtype=float)
+    pbc_kgrid = np.zeros((num_pbc, num_k, 3), dtype=dtype)
     pbc_atom_to_atom = np.ones((num_pbc, num_atoms_pbc), dtype=int) * padding_atom_idx
     pbc_structure_to_structure = np.ones(num_pbc, dtype=int) * padding_structure_idx
     pbc_atom_mask = np.zeros((num_pbc, num_atoms_pbc), dtype=bool)
@@ -251,14 +253,14 @@ def get_kgrid_ewald(cell, lr_wavelength):
     return np.ones((int(ns[0]), int(ns[1]), int(ns[2])))
 
 
-def to_structure(atoms, cutoff):
+def to_structure(atoms, cutoff, dtype=np.float32):
     from vesin import ase_neighbor_list as neighbor_list
 
     structure = {}
-    structure["cell"] = atoms.get_cell().array
-    structure["positions"] = atoms.get_positions()
+    structure["cell"] = atoms.get_cell().array.astype(dtype)
+    structure["positions"] = atoms.get_positions().astype(dtype)
     structure["atomic_numbers"] = atoms.get_atomic_numbers().astype(int)
-    structure["charges"] = atoms.get_initial_charges()
+    structure["charges"] = atoms.get_initial_charges().astype(dtype)
 
     if atoms.pbc.all():
         centers, others, D, S = neighbor_list("ijDS", atoms, cutoff)
@@ -275,7 +277,7 @@ def to_structure(atoms, cutoff):
     structure["centers"] = centers
     structure["others"] = others
     structure["cell_shifts"] = S
-    structure["displacements"] = D
+    structure["displacements"] = D.astype(dtype)
     structure["pbc"] = atoms.get_pbc()
 
     return structure

@@ -253,7 +253,7 @@ def get_kgrid_ewald(cell, lr_wavelength):
     return np.ones((int(ns[0]), int(ns[1]), int(ns[2])))
 
 
-def to_structure(atoms, cutoff, dtype=np.float32):
+def to_structure(atoms, cutoff, dtype=np.float64):
     from vesin import ase_neighbor_list as neighbor_list
 
     structure = {}

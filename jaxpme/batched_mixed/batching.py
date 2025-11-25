@@ -202,8 +202,8 @@ def get_batch(
     return charges, sr_batch, nonperiodic_batch, periodic_batch
 
 
-def prepare(atoms, cutoff, lr_wavelength=None, smearing=None):
-    structure = to_structure(atoms, cutoff)
+def prepare(atoms, cutoff, lr_wavelength=None, smearing=None, dtype=np.float64):
+    structure = to_structure(atoms, cutoff, dtype=dtype)
 
     structure["charges"] = atoms.get_initial_charges()
 

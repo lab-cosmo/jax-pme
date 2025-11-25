@@ -56,15 +56,19 @@ def Ewald(
         )
 
         # real-space, no-pbc
-        real_space = (
-            jax.ops.segment_sum(
-                charges[batch_nopbc.others] * pot.real(extra_r),
-                batch_nopbc.centers,
-                num_segments=N_all,
-            )
-            * batch.atom_mask
-            * ~pbc_mask
-        ) / 2
+        real_space = jax.ops.segment_sum(
+            charges[batch_nopbc.others] * pot.real(extra_r),
+            batch_nopbc.centers,
+            num_segments=N_all,
+        )
+
+        real_space += jax.ops.segment_sum(
+            charges[batch_nopbc.centers] * pot.real(extra_r),
+            batch_nopbc.others,
+            num_segments=N_all,
+        )
+
+        real_space = (real_space * batch.atom_mask * ~pbc_mask) / 2
 
         # real-space, pbc
         real_space += (

@@ -53,6 +53,14 @@ def get_batch(
     _is_pbc = []
     _num_k = []
 
+    num_structures = num_structures if num_structures is not None else strategy
+    num_structures_pbc = num_structures_pbc if num_structures_pbc is not None else strategy
+    num_atoms = num_atoms if num_atoms is not None else strategy
+    num_atoms_pbc = num_atoms_pbc if num_atoms_pbc is not None else strategy
+    num_pairs = num_pairs if num_pairs is not None else strategy
+    num_pairs_nonpbc = num_pairs_nonpbc if num_pairs_nonpbc is not None else strategy
+    num_k = num_k if num_k is not None else strategy
+
     for structure in samples:
         lr = structure["lr"]
         _num_atoms.append(len(structure["positions"]))
@@ -77,13 +85,13 @@ def get_batch(
     _total_pairs_nonpbc = _num_pairs_nonpbc.sum() if len(_num_pairs_nonpbc) > 0 else 0
     _total_pbc = _is_pbc.sum()
 
-    num_structures = get_size(num_structures, _num_structures, strategy=strategy)
-    num_atoms = get_size(num_atoms, _total_atoms, strategy=strategy)
-    num_pairs = get_size(num_pairs, _total_pairs, strategy=strategy)
-    num_atoms_pbc = get_size(num_atoms_pbc, _max_atoms_pbc, strategy=strategy)
-    num_k = get_size(num_k, _max_k, strategy=strategy)
-    num_pairs_nonpbc = get_size(num_pairs_nonpbc, _total_pairs_nonpbc, strategy=strategy)
-    num_pbc = get_size(num_structures_pbc, _total_pbc, strategy=strategy)
+    num_structures = next_size(_num_structures + 1, strategy=num_structures)
+    num_atoms = next_size(_total_atoms + 1, strategy=num_atoms)
+    num_pairs = next_size(_total_pairs + 1, strategy=num_pairs)
+    num_atoms_pbc = next_size(_max_atoms_pbc, strategy=num_atoms_pbc)
+    num_k = next_size(_max_k, strategy=num_k)
+    num_pairs_nonpbc = next_size(_total_pairs_nonpbc + 1, strategy=num_pairs_nonpbc)
+    num_pbc = next_size(_total_pbc, strategy=num_structures_pbc)
 
     padding_atom_idx = _total_atoms
     padding_structure_idx = num_structures - 1
@@ -282,41 +290,31 @@ def to_structure(atoms, cutoff, dtype=np.float64):
     return structure
 
 
-def get_size(proposed, actual, strategy="powers_of_2"):
-    if proposed is not None:
-        if isinstance(proposed, str):
-            return _get_size(actual + 1, strategy=proposed)
-        elif isinstance(proposed, int):
-            assert proposed > actual
-            return proposed
-        else:
-            msg = "could not determine size.\n"
-            msg += f"proposed: {proposed} actual: {actual} strategy: {strategy}"
-            raise ValueError(msg)
-    else:
-        return _get_size(actual + 1, strategy=strategy)
+def next_size(minimum, strategy="powers_of_2"):
+    if isinstance(strategy, int):
+        assert strategy >= minimum
+        return strategy
 
+    if not isinstance(strategy, str):
+        raise ValueError(f"unknown padding size strategy {strategy}")
 
-def _get_size(n, strategy="powers_of_2"):
     if strategy == "multiples":
-        return multiples(n)
+        return multiples(minimum)
 
     prefix = "powers_of_"
     if strategy.startswith(prefix):
         exponent = int(strategy[len(prefix) :])
-        return next_power(n, exponent)
+        return next_power(minimum, exponent)
 
     prefix = "multiples_of_"
     if strategy.startswith(prefix):
         x = int(strategy[len(prefix) :])
-        return next_multiple(n, x)
+        return next_multiple(minimum, x)
 
     raise ValueError(f"unknown padding size strategy {strategy}")
 
 
 def next_multiple(val, n):
-    if val <= 1:
-        return 2
     return n * (1 + int(val // n))
 
 
@@ -352,26 +350,11 @@ def multiples(val):
 ## test ##
 
 
-assert (
-    _get_size(
-        13,
-        strategy="powers_of_2",
-    )
-    == 16
-)
-
-assert (
-    _get_size(
-        33,
-        strategy="powers_of_4",
-    )
-    == 64
-)
-
-assert (
-    _get_size(
-        11,
-        strategy="multiples",
-    )
-    == 12
-)
+assert next_multiple(3, 4) == 4
+assert next_power(7, 2) == 8
+assert next_size(31, strategy="powers_of_2") == 32
+assert next_size(32, strategy="powers_of_2") == 32
+assert next_size(31, strategy="powers_of_4") == 64
+assert next_size(31, strategy="multiples_of_17") == 34
+assert next_size(29, strategy="multiples") == 32
+assert next_size(11, strategy=15) == 15

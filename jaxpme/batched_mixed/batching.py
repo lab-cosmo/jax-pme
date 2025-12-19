@@ -291,6 +291,8 @@ def to_structure(atoms, cutoff, dtype=np.float64):
 
 
 def next_size(minimum, strategy="powers_of_2"):
+    minimum = max(minimum, 1)
+
     if isinstance(strategy, int):
         assert strategy >= minimum
         return strategy

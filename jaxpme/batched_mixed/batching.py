@@ -90,7 +90,7 @@ def get_batch(
     num_pairs = next_size(_total_pairs + 1, strategy=num_pairs)
     num_atoms_pbc = next_size(_max_atoms_pbc, strategy=num_atoms_pbc)
     num_k = next_size(_max_k, strategy=num_k)
-    num_pairs_nonpbc = next_size(_total_pairs_nonpbc + 1, strategy=num_pairs_nonpbc)
+    num_pairs_nonpbc = next_size(_total_pairs_nonpbc, strategy=num_pairs_nonpbc)
     num_pbc = next_size(_total_pbc, strategy=num_structures_pbc)
 
     padding_atom_idx = _total_atoms

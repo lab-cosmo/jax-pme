@@ -107,7 +107,7 @@ def Ewald(
             * pbc_mask
         )
 
-        return real_space + k_space
+        return (real_space + k_space) * prefactor
 
     def prepare_fn(atomss, cutoff, lr_wavelength=None, smearing=None):
         from .batching import get_batch, prepare

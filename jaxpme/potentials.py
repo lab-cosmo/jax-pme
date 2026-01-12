@@ -65,12 +65,22 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
         masked = jnp.where(mask, 1e-6, r)
         return jnp.where(mask, 0.0, pot.real(masked))
 
-    def correction(smearing, charges, volume):
+    def correction(
+        smearing,
+        charges,
+        volume,
+        positions: jnp.ndarray | None = None,
+        cell: jnp.ndarray | None = None,
+        periodic: jnp.ndarray | None = None,
+    ):
         c = -charges * pot.correction_self(smearing)
 
         charge_tot = jnp.sum(charges)
         prefac = pot.correction_background(smearing)
         c -= 2 * prefac * charge_tot / volume
+
+        if (positions is not None) and (cell is not None):
+            c = c + pot.pbc_correction(positions, cell, charges, periodic)
 
         return c
 
@@ -112,10 +122,10 @@ def coulomb():
         return jnp.sqrt(2.0 / jnp.pi) / smearing
 
     def pbc_correction(
-        periodic: jnp.ndarray | None,
         positions: jnp.ndarray,
         cell: jnp.ndarray,
         charges: jnp.ndarray,
+        periodic: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         # "2D periodicity" correction for 1/r potential
         if periodic is None:
@@ -195,7 +205,7 @@ def inverse_power_law(exponent):
         phalf = exponent / 2
         return 1 / gamma(phalf + 1) / (2 * smearing**2) ** phalf
 
-    def pbc_correction(periodic, positions, cell, charges):
+    def pbc_correction(positions, cell, charges, periodic: jnp.ndarray | None = None):
         return jnp.zeros_like(charges)
 
     return RawPotential(

@@ -80,7 +80,15 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
 # -- low-level implementation of potentials --
 RawPotential = namedtuple(
     "RawPotential",
-    ("sr_r", "lr_r", "lr_k2", "real", "correction_background", "correction_self"),
+    (
+        "sr_r",
+        "lr_r",
+        "lr_k2",
+        "real",
+        "correction_background",
+        "correction_self",
+        "pbc_correction",
+    ),
 )
 
 
@@ -103,7 +111,54 @@ def coulomb():
     def correction_self(smearing):
         return jnp.sqrt(2.0 / jnp.pi) / smearing
 
-    return RawPotential(sr_r, lr_r, lr_k2, real, correction_background, correction_self)
+    def pbc_correction(
+        periodic: jnp.ndarray | None,
+        positions: jnp.ndarray,
+        cell: jnp.ndarray,
+        charges: jnp.ndarray,
+    ) -> jnp.ndarray:
+        # "2D periodicity" correction for 1/r potential
+        if periodic is None:
+            periodic = jnp.array([True, True, True])
+
+        n_periodic = jnp.sum(periodic)
+        is_2d = n_periodic == 2
+
+        axis = jnp.argmax(
+            jnp.where(
+                jnp.expand_dims(is_2d, -1),
+                jnp.logical_not(periodic).astype(jnp.int64),
+                jnp.zeros_like(periodic, dtype=jnp.int64),
+            ),
+            axis=-1,
+        )
+
+        E_slab = jnp.zeros_like(charges)
+
+        # gather z_i along the non-periodic axis
+        idx = jnp.expand_dims(jnp.full((positions.shape[0],), axis, dtype=jnp.int32), 1)
+        z_i = jnp.take_along_axis(positions, idx, axis=1)
+
+        # gather basis length for that axis
+        cell_norms = jnp.linalg.norm(cell, axis=-1)  # shape (3,)
+        basis_len = cell_norms[axis]
+
+        V = jnp.abs(jnp.linalg.det(cell))
+        charge_tot = jnp.sum(charges, axis=0)
+        M_axis = jnp.sum(charges * z_i, axis=0)
+        M_axis_sq = jnp.sum(charges * (z_i**2), axis=0)
+
+        E_slab_2d = (4.0 * jnp.pi / V) * (
+            z_i * M_axis
+            - 0.5 * (M_axis_sq + charge_tot * (z_i**2))
+            - (charge_tot / 12.0) * (basis_len**2)
+        )
+
+        return jnp.where(jnp.expand_dims(is_2d, -1), E_slab_2d, E_slab)
+
+    return RawPotential(
+        sr_r, lr_r, lr_k2, real, correction_background, correction_self, pbc_correction
+    )
 
 
 def inverse_power_law(exponent):
@@ -140,4 +195,9 @@ def inverse_power_law(exponent):
         phalf = exponent / 2
         return 1 / gamma(phalf + 1) / (2 * smearing**2) ** phalf
 
-    return RawPotential(sr_r, lr_r, lr_k2, real, correction_background, correction_self)
+    def pbc_correction(periodic, positions, cell, charges):
+        return jnp.zeros_like(charges)
+
+    return RawPotential(
+        sr_r, lr_r, lr_k2, real, correction_background, correction_self, pbc_correction
+    )

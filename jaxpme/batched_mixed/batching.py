@@ -24,7 +24,14 @@ Batch = namedtuple(
 )
 Periodic = namedtuple(
     "Periodic",
-    ("k_grid", "atom_to_atom", "structure_to_structure", "atom_mask", "structure_mask"),
+    (
+        "k_grid",
+        "atom_to_atom",
+        "structure_to_structure",
+        "atom_mask",
+        "structure_mask",
+        "pbc",
+    ),
     # atom_to_atom: indices into SR batch positions [num_pbc, num_atoms_pbc]
     #               -> positions[atom_to_atom]
     # structure_to_structure: indices into SR batch structures [num_pbc]
@@ -122,6 +129,7 @@ def get_batch(
     pbc_structure_to_structure = np.ones(num_pbc, dtype=int) * padding_structure_idx
     pbc_atom_mask = np.zeros((num_pbc, num_atoms_pbc), dtype=bool)
     pbc_structure_mask = np.zeros(num_pbc, dtype=bool)
+    pbc_vectors = np.zeros((num_pbc, 3), dtype=bool)
 
     atom_offset = 0
     pair_offset = 0
@@ -162,6 +170,7 @@ def get_batch(
 
             pbc_atom_mask[pbc_idx, :num_n] = True
             pbc_structure_mask[pbc_idx] = True
+            pbc_vectors[pbc_idx] = structure["pbc"]
             pbc_idx += 1
         else:
             num_nonpbc = len(lr.centers)
@@ -199,6 +208,7 @@ def get_batch(
         structure_to_structure=pbc_structure_to_structure,
         atom_mask=pbc_atom_mask,
         structure_mask=pbc_structure_mask,
+        pbc=pbc_vectors,
     )
 
     nonperiodic_batch = NonPeriodic(
@@ -269,8 +279,21 @@ def to_structure(atoms, cutoff, dtype=np.float64):
     structure["atomic_numbers"] = atoms.get_atomic_numbers().astype(int)
     structure["charges"] = atoms.get_initial_charges().astype(dtype)
 
+    def _is_orthorhombic(cell, atol=1e-10):
+        return np.allclose(cell, np.diag(np.diag(cell)), atol=atol)
+
     if atoms.pbc.all():
+        # fully periodic (3D)
         centers, others, D, S = neighbor_list("ijDS", atoms, cutoff)
+    elif atoms.pbc.sum() == 2:
+        # require orthorhombic cell for slab corrections
+        if not _is_orthorhombic(structure["cell"]):
+            raise ValueError(
+                "2D PBCs require an orthorhombic cell (diagonal 3x3)."
+                f"Got cell=\n{structure['cell']}"
+            )
+        centers, others, D, S = neighbor_list("ijDS", atoms, cutoff)
+
     elif atoms.pbc.any():
         raise ValueError  # not supported here
     else:

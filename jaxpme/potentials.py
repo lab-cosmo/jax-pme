@@ -127,36 +127,25 @@ def coulomb():
         charges,
         pbc=None,
     ):
-        # "2D periodicity" correction for 1/r potential
+        # define a zeros array to handle systems with no pbc or non 2D
+        zeros = jnp.zeros_like(charges)
         if pbc is None:
-            pbc = jnp.array([True, True, True])
+            return zeros
 
-        n_periodic = jnp.sum(pbc)
-        is_2d = n_periodic == 2
+        # mask to check if it's a 2D system
+        is_2d = jnp.sum(pbc) == 2
+        nonpbc = jnp.logical_not(pbc).astype(positions.dtype)
 
-        axis = jnp.argmax(
-            jnp.where(
-                jnp.expand_dims(is_2d, -1),
-                jnp.logical_not(pbc).astype(jnp.int64),
-                jnp.zeros_like(pbc, dtype=jnp.int64),
-            ),
-            axis=-1,
-        )
+        # coordinates along the non-periodic axis (orthorhombic case)
+        z_i = jnp.sum(positions * nonpbc, axis=1)
 
-        E_slab = jnp.zeros_like(charges)
-
-        # gather z_i along the non-periodic axis
-        idx = jnp.expand_dims(jnp.full((positions.shape[0],), axis, dtype=jnp.int32), 1)
-        z_i = jnp.take_along_axis(positions, idx, axis=1)
-
-        # gather basis length for that axis
         cell_norms = jnp.linalg.norm(cell, axis=-1)  # shape (3,)
-        basis_len = cell_norms[axis]
+        basis_len = jnp.sum(cell_norms * nonpbc)
 
         V = jnp.abs(jnp.linalg.det(cell))
-        charge_tot = jnp.sum(charges, axis=0)
-        M_axis = jnp.sum(charges * z_i, axis=0)
-        M_axis_sq = jnp.sum(charges * (z_i**2), axis=0)
+        charge_tot = jnp.sum(charges)
+        M_axis = jnp.sum(charges * z_i)
+        M_axis_sq = jnp.sum(charges * (z_i**2))
 
         E_slab_2d = (4.0 * jnp.pi / V) * (
             z_i * M_axis
@@ -164,7 +153,7 @@ def coulomb():
             - (charge_tot / 12.0) * (basis_len**2)
         )
 
-        return jnp.where(jnp.expand_dims(is_2d, -1), E_slab_2d, E_slab)
+        return jnp.where(is_2d, E_slab_2d, zeros)
 
     return RawPotential(
         sr_r, lr_r, lr_k2, real, correction_background, correction_self, correction_pbc

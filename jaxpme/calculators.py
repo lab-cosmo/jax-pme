@@ -52,6 +52,7 @@ def Ewald(
         atom_mask=None,
         pair_mask=None,
         distances=None,
+        pbc=None,
     ):
         reciprocal_cell = get_reciprocal(cell)
 
@@ -71,7 +72,7 @@ def Ewald(
             charges *= atom_mask
 
         rspace = solver.rspace(smearing, charges, r, i, j)
-        kspace = solver.kspace(smearing, charges, kvectors, positions, volume)
+        kspace = solver.kspace(smearing, charges, kvectors, positions, volume, cell, pbc)
 
         potentials = rspace + kspace
 
@@ -131,6 +132,7 @@ def PME(
         smearing,
         atom_mask=None,
         pair_mask=None,
+        pbc=None,
     ):
         reciprocal_cell = get_reciprocal(cell)
 
@@ -151,7 +153,15 @@ def PME(
 
         rspace = solver.rspace(smearing, charges, r, i, j)
         kspace = solver.kspace(
-            smearing, charges, reciprocal_cell, k_grid, kvectors, positions, volume
+            smearing,
+            charges,
+            reciprocal_cell,
+            k_grid,
+            kvectors,
+            positions,
+            volume,
+            cell,
+            pbc,
         )
 
         potentials = rspace + kspace

@@ -206,7 +206,9 @@ def inverse_power_law(exponent):
         return 1 / gamma(phalf + 1) / (2 * smearing**2) ** phalf
 
     def correction_pbc(positions, cell, charges, pbc=None):
-        raise NotImplementedError("PBC correction is not implemented for this potential.")
+        raise NotImplementedError(
+            "Mixed PBC correction is not implemented for this potential."
+        )
 
     return RawPotential(
         sr_r, lr_r, lr_k2, real, correction_background, correction_self, correction_pbc

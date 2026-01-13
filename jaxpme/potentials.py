@@ -79,7 +79,7 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
         prefac = pot.correction_background(smearing)
         c -= 2 * prefac * charge_tot / volume
 
-        if (positions is not None) and (cell is not None):
+        if jnp.sum(pbc) == 2:
             c = c + pot.correction_pbc(positions, cell, charges, pbc)
 
         return c

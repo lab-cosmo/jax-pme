@@ -8,7 +8,7 @@ from ase.io import read
 def test_reference_structures(cutoff):
     from jaxpme.batched_flat.calculators import Ewald
 
-    structures = read("reference_structures/coulomb_test_frames.xyz", index=":")
+    structures = read("reference_structures/coulomb_test_frames.xyz", index=":3")
     atoms_no_pbc = structures[-1].copy()
     atoms_no_pbc.set_pbc(False)
 

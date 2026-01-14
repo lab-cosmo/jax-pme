@@ -88,6 +88,7 @@ def Ewald(
         cell = batch.cell[batch_pbc.structure_to_structure]
         reciprocal_cell = jax.vmap(get_reciprocal)(cell)
         volume = jax.vmap(get_volume)(cell)
+        pbc = batch_pbc.pbc
 
         kvectors = jax.vmap(generate_ewald_kvectors)(reciprocal_cell, batch_pbc.k_grid)
 
@@ -97,6 +98,8 @@ def Ewald(
             kvectors,
             batch.positions[batch_pbc.atom_to_atom],
             volume,
+            cell,
+            pbc,
         )
 
         k_space = (

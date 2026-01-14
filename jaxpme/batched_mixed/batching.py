@@ -231,7 +231,7 @@ def prepare(atoms, cutoff, lr_wavelength=None, smearing=None, dtype=np.float64):
     if smearing is None:
         smearing = cutoff / 4.0
 
-    smearing, lr = to_lr(atoms, structure, lr_wavelength, smearing)
+    smearing, lr = to_lr(structure, lr_wavelength, smearing)
 
     structure["lr"] = lr
     if smearing is not None:
@@ -240,9 +240,12 @@ def prepare(atoms, cutoff, lr_wavelength=None, smearing=None, dtype=np.float64):
     return structure
 
 
-def to_lr(atoms, structure, lr_wavelength, smearing):
-    if atoms.pbc.all():
-        cell = atoms.get_cell().array
+def to_lr(structure, lr_wavelength, smearing):
+    N = len(structure["positions"])
+    pbc = structure["pbc"]
+
+    if pbc.sum() in [2, 3]:
+        cell = structure["cell"]
         k_grid = get_kgrid_ewald(cell, lr_wavelength)
         return smearing, Periodic(
             k_grid=k_grid,
@@ -250,9 +253,9 @@ def to_lr(atoms, structure, lr_wavelength, smearing):
             structure_to_structure=None,
             atom_mask=None,
             structure_mask=None,
+            pbc=pbc,
         )
-    elif not atoms.pbc.all():
-        N = len(atoms)
+    elif not pbc.any():
         j, i = np.triu_indices(N, k=1)
 
         return None, NonPeriodic(
@@ -262,7 +265,7 @@ def to_lr(atoms, structure, lr_wavelength, smearing):
         )
 
     else:
-        raise ValueError("no mixed pbc yet")
+        raise ValueError(f"we support 3D, 2D, or no pbc. got {pbc}")
 
 
 def get_kgrid_ewald(cell, lr_wavelength):
@@ -279,15 +282,13 @@ def to_structure(atoms, cutoff, dtype=np.float64):
     structure["atomic_numbers"] = atoms.get_atomic_numbers().astype(int)
     structure["charges"] = atoms.get_initial_charges().astype(dtype)
 
-    def _is_orthorhombic(cell, atol=1e-10):
-        return np.allclose(cell, np.diag(np.diag(cell)), atol=atol)
-
     if atoms.pbc.all():
         # fully periodic (3D)
         centers, others, D, S = neighbor_list("ijDS", atoms, cutoff)
     elif atoms.pbc.sum() == 2:
-        # require orthorhombic cell for slab corrections
-        if not _is_orthorhombic(structure["cell"]):
+        # mixed pbc (2D)
+        # -> require orthorhombic cell!
+        if not atoms.get_cell().orthorhombic:
             raise ValueError(
                 "2D PBCs require an orthorhombic cell (diagonal 3x3)."
                 f"Got cell=\n{structure['cell']}"
@@ -295,10 +296,8 @@ def to_structure(atoms, cutoff, dtype=np.float64):
         centers, others, D, S = neighbor_list("ijDS", atoms, cutoff)
 
     elif atoms.pbc.any():
-        raise ValueError  # not supported here
+        raise ValueError("we support: 3D pbc, 2D pbc, no pbc. received neither.")
     else:
-        assert not atoms.pbc.any()
-
         centers, others, D = neighbor_list("ijD", atoms, cutoff)
         S = np.zeros((len(centers), 3), dtype=int)
         if (structure["cell"] == 0).all():

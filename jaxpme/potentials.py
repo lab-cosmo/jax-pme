@@ -79,8 +79,8 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
         prefac = pot.correction_background(smearing)
         c -= 2 * prefac * charge_tot / volume
 
-        if jnp.sum(pbc) == 2:
-            c = c + pot.correction_pbc(positions, cell, charges, pbc)
+        if pbc is not None:
+            c += pot.correction_pbc(positions, cell, charges, pbc) / volume
 
         return c
 
@@ -125,35 +125,30 @@ def coulomb():
         positions,
         cell,
         charges,
-        pbc=None,
+        pbc,
     ):
-        # define a zeros array to handle systems with no pbc or non 2D
-        zeros = jnp.zeros_like(charges)
-        if pbc is None:
-            return zeros
-
-        # mask to check if it's a 2D system
         is_2d = jnp.sum(pbc) == 2
-        nonpbc = jnp.logical_not(pbc).astype(positions.dtype)
+        nonpbc = ~pbc
 
-        # coordinates along the non-periodic axis (orthorhombic case)
-        z_i = jnp.sum(positions * nonpbc, axis=1)
+        # coordinates along the non-periodic axis
+        # note: orthorhombic case only!
+        z_i = jnp.sum(positions * nonpbc[None, :], axis=1)
 
         cell_norms = jnp.linalg.norm(cell, axis=-1)  # shape (3,)
         basis_len = jnp.sum(cell_norms * nonpbc)
 
-        V = jnp.abs(jnp.linalg.det(cell))
         charge_tot = jnp.sum(charges)
         M_axis = jnp.sum(charges * z_i)
         M_axis_sq = jnp.sum(charges * (z_i**2))
 
-        E_slab_2d = (4.0 * jnp.pi / V) * (
+        E_slab_2d = (4.0 * jnp.pi) * (
             z_i * M_axis
             - 0.5 * (M_axis_sq + charge_tot * (z_i**2))
             - (charge_tot / 12.0) * (basis_len**2)
         )
 
-        return jnp.where(is_2d, E_slab_2d, zeros)
+        # if not is_2d, this is zero
+        return is_2d * E_slab_2d
 
     return RawPotential(
         sr_r, lr_r, lr_k2, real, correction_background, correction_self, correction_pbc

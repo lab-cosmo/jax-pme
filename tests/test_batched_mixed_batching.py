@@ -145,3 +145,38 @@ def test_padding():
     padding_structure = 7  # num_structures - 1
     assert np.all(sr_batch.atom_to_structure[~sr_batch.atom_mask] == padding_structure)
     assert np.all(sr_batch.pair_to_structure[~sr_batch.pair_mask] == padding_structure)
+
+
+def test_mixed_pbc_smoke():
+    """Smoke test for mixed PBC: 2D orthorhombic + non-periodic."""
+    from ase import Atoms
+
+    from jaxpme.batched_mixed.batching import get_batch, prepare
+
+    # 2D orthorhombic structure
+    cell_2d = np.diag([10.0, 10.0, 20.0])
+    atoms_2d = Atoms(
+        "H2",
+        positions=[[5.0, 5.0, 5.0], [5.0, 5.0, 6.0]],
+        cell=cell_2d,
+        pbc=[True, True, False],
+    )
+    atoms_2d.set_initial_charges([1.0, -1.0])
+
+    # Non-periodic structure
+    atoms_0d = Atoms(
+        "H2", positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]], pbc=[False, False, False]
+    )
+    atoms_0d.set_initial_charges([1.0, -1.0])
+
+    cutoff = 3.0
+    samples = [prepare(atoms_2d, cutoff), prepare(atoms_0d, cutoff)]
+
+    # This should not blow up
+    charges, sr_batch, nonp_batch, pbc_batch = get_batch(samples)
+
+    assert sr_batch.structure_mask.sum() == 2
+    assert sr_batch.pbc_mask[0]
+    assert not sr_batch.pbc_mask[1]
+    assert pbc_batch.structure_mask.sum() == 1
+    assert nonp_batch.pair_mask.sum() > 0

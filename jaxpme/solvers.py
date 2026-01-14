@@ -63,9 +63,7 @@ def pme(potential, interpolation_nodes=4, full_neighbor_list=False):
         potential_mesh = jnp.fft.irfftn(filter_hat, norm="forward", s=rho_mesh.shape)
         pot = mesh_to_points(potential_mesh, mesh) / volume
 
-        pot += potential.correction(
-            smearing, charges, volume, positions, cell, charges, pbc
-        )
+        pot += potential.correction(smearing, charges, volume, positions, cell, pbc)
         return pot / 2
 
     return Solver(rspace, kspace)
@@ -94,9 +92,7 @@ def ewald(potential, full_neighbor_list=False):
 
         pot /= volume
 
-        pot += potential.correction(
-            smearing, charges, volume, positions, cell, charges, pbc
-        )
+        pot += potential.correction(smearing, charges, volume, positions, cell, pbc)
         return pot / 2
 
     return Solver(rspace, kspace)

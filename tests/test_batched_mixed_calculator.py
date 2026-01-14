@@ -104,3 +104,53 @@ def test_single_periodic_system(cutoff):
 
     np.testing.assert_allclose(potentials[sr_batch.atom_mask], pot_ref)
     np.testing.assert_allclose(energy[0], energy_ref)
+
+
+@pytest.mark.parametrize("cutoff", [5.0])
+def test_mixed_pbc_calculator(cutoff):
+    """Smoke test for mixed PBC: 2D orthorhombic + non-periodic end-to-end."""
+    from ase import Atoms
+
+    from jaxpme.batched_mixed.calculators import Ewald
+
+    # 2D orthorhombic structure (needs to be large enough for the cutoff or handled)
+    cell_2d = np.diag([10.0, 10.0, 20.0])
+    atoms_2d = Atoms(
+        "H2",
+        positions=[[5.0, 5.0, 5.0], [5.0, 5.0, 6.0]],
+        cell=cell_2d,
+        pbc=[True, True, False],
+    )
+    atoms_2d.set_initial_charges([1.0, -1.0])
+
+    # Non-periodic structure
+    atoms_0d = Atoms(
+        "H2", positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]], pbc=[False, False, False]
+    )
+    atoms_0d.set_initial_charges([1.0, -1.0])
+
+    calculator = Ewald(prefactor=1.0)
+    charges, sr_batch, nonp_batch, pbc_batch = calculator.prepare(
+        [atoms_2d, atoms_0d], cutoff
+    )
+
+    # Check everything runs
+    potentials = calculator.potentials(charges, sr_batch, nonp_batch, pbc_batch)
+    energy = calculator.energy(charges, sr_batch, nonp_batch, pbc_batch)
+    energy_f, forces = calculator.energy_forces(charges, sr_batch, nonp_batch, pbc_batch)
+
+    assert not np.isnan(potentials).any()
+    assert not np.isnan(energy).any()
+    assert not np.isnan(forces).any()
+
+    # Energy should be a vector of length num_structures (padded to power of 2)
+    # Here 2 structures + 1 padding -> next power of 2 is 4
+    assert energy.shape[0] >= 2
+    assert energy[0] != 0
+    assert energy[1] != 0
+    assert energy[2] == 0  # Padding
+    assert energy[3] == 0  # Padding
+
+    # Basic sanity: energy of neutral H2 (0D) with prefactor=1.0
+    # should be something reasonable
+    assert energy[1] < 0  # Binding energy for opposites

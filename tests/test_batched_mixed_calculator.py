@@ -106,7 +106,7 @@ def test_single_system_vs_serial(cutoff):
     np.testing.assert_allclose(energy[0], energy_ref)
 
 
-@pytest.mark.parametrize("frame_index", [0, 1, 2, 3])
+@pytest.mark.parametrize("frame_index", [0, 1, 2, 3, 4, 5])
 @pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
 def test_single_system_vs_reference(frame_index, cutoff):
     """Test calculator with a single (mixed) pbc system."""
@@ -117,7 +117,7 @@ def test_single_system_vs_reference(frame_index, cutoff):
 
     calculator = Ewald(prefactor=prefactors.eV_A)
     charges, sr_batch, nonperiodic_batch, periodic_batch = calculator.prepare(
-        [atoms], cutoff
+        [atoms], cutoff, smearing = cutoff / 8, lr_wavelength = cutoff / 16
     )
     energy, forces = calculator.energy_forces(
         charges, sr_batch, nonperiodic_batch, periodic_batch

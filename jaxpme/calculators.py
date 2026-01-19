@@ -179,9 +179,7 @@ def PME(
         graph = atoms_to_graph(atoms, cutoff)
 
         if charges is None:
-            charges = jnp.array([-1.0, 1.0])
-            charges = jnp.tile(charges, len(atoms) // 2)
-
+            charges = atoms.get_initial_charges()
         else:
             charges = jnp.array(charges).flatten()
 

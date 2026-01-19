@@ -5,7 +5,7 @@ from collections import namedtuple
 
 from .kspace import generate_kvectors, get_reciprocal
 from .potentials import potential
-from .solvers import ewald, pme
+from .solvers import ewald, p3m, pme
 from .utils import atoms_to_graph, get_distances
 
 # calculators: high-level interface
@@ -182,6 +182,96 @@ def PME(
             charges = jnp.array([-1.0, 1.0])
             charges = jnp.tile(charges, len(atoms) // 2)
 
+        else:
+            charges = jnp.array(charges).flatten()
+
+        k_grid = get_kgrid_mesh(jnp.array(atoms.get_cell().array), mesh_spacing)
+
+        return charges, *graph, k_grid, smearing
+
+    return Calculator(prepare_fn, potentials_fn, *get_calculate_functions(potentials_fn))
+
+
+def P3M(
+    exponent=1,
+    exclusion_radius=None,
+    prefactor=1.0,
+    interpolation_nodes=4,
+    custom_potential=None,
+    full_neighbor_list=False,
+):
+    """Particle-Particle Particle-Mesh calculator.
+
+    Like PME but uses B-spline interpolation with an optimized influence
+    function that corrects for the smoothing introduced by mesh assignment.
+    Supports interpolation_nodes = 1, 2, 3, 4, 5.
+    """
+    pot = potential(
+        exponent=exponent,
+        exclusion_radius=exclusion_radius,
+        custom_potential=custom_potential,
+    )
+    solver = p3m(
+        pot, interpolation_nodes=interpolation_nodes, full_neighbor_list=full_neighbor_list
+    )
+
+    def potentials_fn(
+        charges,
+        cell,
+        positions,
+        i,
+        j,
+        cell_shifts,
+        k_grid,
+        smearing,
+        atom_mask=None,
+        pair_mask=None,
+        pbc=None,
+    ):
+        reciprocal_cell = get_reciprocal(cell)
+
+        r = get_distances(cell, positions[i], positions[j], cell_shifts)
+        if pair_mask is not None:
+            r *= pair_mask
+
+        volume = jnp.abs(jnp.linalg.det(cell))
+        kvectors = generate_kvectors(
+            reciprocal_cell,
+            k_grid.shape,
+            dtype=positions.dtype,
+            for_ewald=False,
+        )
+
+        if atom_mask is not None:
+            charges *= atom_mask
+
+        rspace = solver.rspace(smearing, charges, r, i, j)
+        kspace = solver.kspace(
+            smearing,
+            charges,
+            reciprocal_cell,
+            k_grid,
+            kvectors,
+            positions,
+            volume,
+            cell,
+            pbc,
+        )
+
+        potentials = rspace + kspace
+
+        if atom_mask is not None:
+            potentials *= atom_mask
+
+        return prefactor * potentials
+
+    def prepare_fn(atoms, charges, cutoff, mesh_spacing, smearing):
+        from .kspace import get_kgrid_mesh
+
+        graph = atoms_to_graph(atoms, cutoff)
+
+        if charges is None:
+            charges = atoms.get_initial_charges()
         else:
             charges = jnp.array(charges).flatten()
 

@@ -3,6 +3,7 @@ import jax
 
 import pytest
 from ase.io import read
+from conftest import REFERENCE_STRUCTURES_DIR
 
 jax.config.update("jax_enable_x64", True)
 
@@ -13,7 +14,7 @@ def test_reference_structures(cutoff):
     from jaxpme.batched_mixed.calculators import Ewald
     from jaxpme.calculators import Ewald as SerialEwald
 
-    structures = read("reference_structures/coulomb_test_frames.xyz", index=":3")
+    structures = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index=":3")
     atoms_no_pbc = structures[-1].copy()
     atoms_no_pbc.set_pbc(False)
 
@@ -57,7 +58,7 @@ def test_mixed(cutoff):
     """Test calculator with mixed periodic and non-periodic systems."""
     from jaxpme.batched_mixed.calculators import Ewald
 
-    atoms = read("reference_structures/coulomb_test_frames.xyz", index="0")
+    atoms = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index="0")
     charges = atoms.get_initial_charges()
     atoms2 = atoms.copy()
     atoms2.set_pbc(False)
@@ -86,7 +87,7 @@ def test_single_system_vs_serial(cutoff):
     from jaxpme.batched_mixed.calculators import Ewald
     from jaxpme.calculators import Ewald as SerialEwald
 
-    atoms = read("reference_structures/coulomb_test_frames.xyz", index="0")
+    atoms = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index="0")
 
     # Calculate with batched calculator
     calculator = Ewald(prefactor=1.0)
@@ -113,7 +114,7 @@ def test_single_system_vs_reference(frame_index, cutoff):
     from jaxpme import prefactors
     from jaxpme.batched_mixed.calculators import Ewald
 
-    atoms = read("reference_structures/coulomb_test_frames.xyz", index=frame_index)
+    atoms = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index=frame_index)
 
     calculator = Ewald(prefactor=prefactors.eV_A)
     charges, sr_batch, nonperiodic_batch, periodic_batch = calculator.prepare(

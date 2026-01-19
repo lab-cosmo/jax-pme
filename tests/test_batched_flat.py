@@ -2,13 +2,14 @@ import numpy as np
 
 import pytest
 from ase.io import read
+from conftest import REFERENCE_STRUCTURES_DIR
 
 
 @pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
 def test_reference_structures(cutoff):
     from jaxpme.batched_flat.calculators import Ewald
 
-    structures = read("reference_structures/coulomb_test_frames.xyz", index=":3")
+    structures = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index=":3")
     atoms_no_pbc = structures[-1].copy()
     atoms_no_pbc.set_pbc(False)
 
@@ -47,7 +48,7 @@ def test_reference_structures(cutoff):
 def test_mixed(cutoff):
     from jaxpme.batched_flat.calculators import Ewald
 
-    atoms = read("reference_structures/coulomb_test_frames.xyz", index="0")
+    atoms = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index="0")
     charges = atoms.get_initial_charges()
     atoms2 = atoms.copy()
     atoms2.set_pbc(False)

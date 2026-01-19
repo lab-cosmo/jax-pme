@@ -3,11 +3,11 @@ import jax
 import jax.numpy as jnp
 
 import math
-import os
 
 import pytest
 from ase import Atoms
 from ase.io import read
+from conftest import REFERENCE_STRUCTURES_DIR
 
 from jaxpme import PME, Ewald
 
@@ -428,8 +428,7 @@ def test_random_structure(
     # rcoulomb = 0.3  ; nm
     from jaxpme import prefactors
 
-    struc_path = "reference_structures/"
-    frame = read(os.path.join(struc_path, "coulomb_test_frames.xyz"), frame_index)
+    frame = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", frame_index)
 
     energy_target = jnp.array(frame.get_potential_energy(), dtype=DTYPE) / scaling_factor
     forces_target = jnp.array(frame.get_forces(), dtype=DTYPE) / scaling_factor**2

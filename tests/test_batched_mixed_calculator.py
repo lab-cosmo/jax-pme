@@ -117,7 +117,7 @@ def test_single_system_vs_reference(frame_index, cutoff):
 
     calculator = Ewald(prefactor=prefactors.eV_A)
     charges, sr_batch, nonperiodic_batch, periodic_batch = calculator.prepare(
-        [atoms], cutoff, smearing = cutoff / 8, lr_wavelength = cutoff / 16
+        [atoms], cutoff, smearing=cutoff / 8, lr_wavelength=cutoff / 16
     )
     energy, forces = calculator.energy_forces(
         charges, sr_batch, nonperiodic_batch, periodic_batch

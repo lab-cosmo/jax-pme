@@ -25,15 +25,14 @@ def p3m_influence(kvectors, cell, ns, interpolation_nodes):
     Returns:
         influence: 1/U²(k), same shape as kvectors[..., 0]
     """
-    # Actual mesh spacing per axis: h = |cell_axis| / n_axis
-    cell_lengths = jnp.linalg.norm(cell, axis=-1)
-    mesh_spacing = cell_lengths / ns
+    # Project k onto each cell axis direction to get the phase advance per mesh cell.
+    # For axis i: kh[i] = (k · cell[i]) / n[i]
+    # This is correct for non-orthogonal cells where cell vectors aren't axis-aligned.
+    kh = jnp.einsum("...j,ij->...i", kvectors, cell) / ns
 
-    # kh / (2π) = k * h / (2π) for each axis
-    # sinc in numpy is sin(πx)/(πx), so sinc(kh/2π) = sin(kh/2) / (kh/2)
-    # We need: sinc(kh / (2π)) where sinc(x) = sin(πx)/(πx)
-    # So the argument to jnp.sinc is kh / (2π)
-    kh_over_2pi = kvectors * mesh_spacing / (2 * jnp.pi)
+    # kh / (2π) for the sinc argument
+    # jnp.sinc(x) = sin(πx)/(πx), so sinc(kh/2π) gives us the right formula
+    kh_over_2pi = kh / (2 * jnp.pi)
 
     # U²(k) = Π_axis sinc(kh_axis / 2π)^(2n)
     # jnp.sinc(x) = sin(πx)/(πx)

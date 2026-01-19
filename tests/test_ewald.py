@@ -479,10 +479,7 @@ def test_random_structure(
         rtol_e = 4.5e-3
         rtol_f = 5.0e-3
 
-    # Stress tolerance matches torch-pme (5e-3)
-    # P3M may need slightly higher tolerance for rotated cells
-    # TODO: investigate P3M stress gradient accuracy for ortho1 rotation
-    rtol_stress = 5e-3 if calc_name != "p3m" else 1e-2
+    rtol_stress = 5e-3
 
     if not padded:
         energy, forces, stress = calc.energy_forces_stress(*inputs)

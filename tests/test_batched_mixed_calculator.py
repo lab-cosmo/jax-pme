@@ -13,7 +13,7 @@ def test_reference_structures(cutoff):
     from jaxpme.batched_mixed.calculators import Ewald
     from jaxpme.calculators import Ewald as SerialEwald
 
-    structures = read("reference_structures/coulomb_test_frames.xyz", index=":")
+    structures = read("reference_structures/coulomb_test_frames.xyz", index=":3")
     atoms_no_pbc = structures[-1].copy()
     atoms_no_pbc.set_pbc(False)
 
@@ -81,7 +81,7 @@ def test_mixed(cutoff):
 
 
 @pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
-def test_single_periodic_system(cutoff):
+def test_single_system_vs_serial(cutoff):
     """Test calculator with a single periodic system."""
     from jaxpme.batched_mixed.calculators import Ewald
     from jaxpme.calculators import Ewald as SerialEwald
@@ -104,6 +104,30 @@ def test_single_periodic_system(cutoff):
 
     np.testing.assert_allclose(potentials[sr_batch.atom_mask], pot_ref)
     np.testing.assert_allclose(energy[0], energy_ref)
+
+
+@pytest.mark.parametrize("frame_index", [0, 1, 2, 3, 4, 5])
+@pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
+def test_single_system_vs_reference(frame_index, cutoff):
+    """Test calculator with a single (mixed) pbc system."""
+    from jaxpme import prefactors
+    from jaxpme.batched_mixed.calculators import Ewald
+
+    atoms = read("reference_structures/coulomb_test_frames.xyz", index=frame_index)
+
+    calculator = Ewald(prefactor=prefactors.eV_A)
+    charges, sr_batch, nonperiodic_batch, periodic_batch = calculator.prepare(
+        [atoms], cutoff, smearing=cutoff / 8, lr_wavelength=cutoff / 16
+    )
+    energy, forces = calculator.energy_forces(
+        charges, sr_batch, nonperiodic_batch, periodic_batch
+    )
+
+    # todo: why are the tolerances so big?
+    np.testing.assert_allclose(
+        energy[sr_batch.structure_mask], atoms.get_potential_energy(), rtol=1e-4, atol=0
+    )
+    np.testing.assert_allclose(forces[sr_batch.atom_mask], atoms.get_forces(), rtol=2e-2)
 
 
 @pytest.mark.parametrize("cutoff", [5.0])

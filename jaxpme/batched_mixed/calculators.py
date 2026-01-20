@@ -4,10 +4,9 @@ import jax.numpy as jnp
 from jaxpme.calculators import Calculator
 from jaxpme.kspace import get_reciprocal
 from jaxpme.potentials import potential
-from jaxpme.utils import safe_norm
+from jaxpme.utils import get_distances, get_volume, safe_norm
 
 from .kspace import generate_ewald_kvectors
-from .utils import get_distances, get_volume
 
 
 def Ewald(

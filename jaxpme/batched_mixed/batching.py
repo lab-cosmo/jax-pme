@@ -225,6 +225,9 @@ def prepare(atoms, cutoff, lr_wavelength=None, smearing=None, dtype=np.float64):
 
     structure["charges"] = atoms.get_initial_charges()
 
+    # these values are rough estimates -- should be accurate, but
+    # are probably not pareto optimal wrt performance.
+
     if lr_wavelength is None:
         lr_wavelength = cutoff / 8.0
 

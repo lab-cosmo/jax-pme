@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from collections import namedtuple
 
 # -- high-level interface --
-Potential = namedtuple("Potential", ("sr", "lr", "correction"))
+Potential = namedtuple("Potential", ("sr", "lr", "real", "correction"))
 
 
 def potential(exponent=1, exclusion_radius=None, custom_potential=None):
@@ -60,21 +60,45 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
         masked = jnp.where(mask, 1e-6, k2)
         return jnp.where(mask, 0.0, pot.lr_k2(smearing, masked))
 
-    def correction(smearing, charges, volume):
+    def real(r):
+        mask = r == 0
+        masked = jnp.where(mask, 1e-6, r)
+        return jnp.where(mask, 0.0, pot.real(masked))
+
+    def correction(
+        smearing,
+        charges,
+        volume,
+        positions=None,
+        cell=None,
+        pbc=None,
+    ):
         c = -charges * pot.correction_self(smearing)
 
         charge_tot = jnp.sum(charges)
         prefac = pot.correction_background(smearing)
         c -= 2 * prefac * charge_tot / volume
 
+        if pbc is not None:
+            c += pot.correction_pbc(positions, cell, charges, pbc) / volume
+
         return c
 
-    return Potential(sr, lr, correction)
+    return Potential(sr, lr, real, correction)
 
 
 # -- low-level implementation of potentials --
 RawPotential = namedtuple(
-    "RawPotential", ("sr_r", "lr_r", "lr_k2", "correction_background", "correction_self")
+    "RawPotential",
+    (
+        "sr_r",
+        "lr_r",
+        "lr_k2",
+        "real",
+        "correction_background",
+        "correction_self",
+        "correction_pbc",
+    ),
 )
 
 
@@ -86,7 +110,10 @@ def coulomb():
         return jax.scipy.special.erf(r / (smearing * jnp.sqrt(2.0))) / r
 
     def sr_r(smearing, r):
-        return 1.0 / r - lr_r(smearing, r)
+        return real(r) - lr_r(smearing, r)
+
+    def real(r):
+        return 1.0 / r
 
     def correction_background(smearing):
         return jnp.pi * smearing**2
@@ -94,7 +121,38 @@ def coulomb():
     def correction_self(smearing):
         return jnp.sqrt(2.0 / jnp.pi) / smearing
 
-    return RawPotential(sr_r, lr_r, lr_k2, correction_background, correction_self)
+    def correction_pbc(
+        positions,
+        cell,
+        charges,
+        pbc,
+    ):
+        is_2d = jnp.sum(pbc) == 2
+        nonpbc = ~pbc
+
+        # coordinates along the non-periodic axis
+        # note: orthorhombic case only!
+        z_i = jnp.sum(positions * nonpbc[None, :], axis=1)
+
+        cell_norms = jnp.linalg.norm(cell, axis=-1)  # shape (3,)
+        basis_len = jnp.sum(cell_norms * nonpbc)
+
+        charge_tot = jnp.sum(charges)
+        M_axis = jnp.sum(charges * z_i)
+        M_axis_sq = jnp.sum(charges * (z_i**2))
+
+        E_slab_2d = (4.0 * jnp.pi) * (
+            z_i * M_axis
+            - 0.5 * (M_axis_sq + charge_tot * (z_i**2))
+            - (charge_tot / 12.0) * (basis_len**2)
+        )
+
+        # if not is_2d, this is zero
+        return is_2d * E_slab_2d
+
+    return RawPotential(
+        sr_r, lr_r, lr_k2, real, correction_background, correction_self, correction_pbc
+    )
 
 
 def inverse_power_law(exponent):
@@ -117,7 +175,10 @@ def inverse_power_law(exponent):
         return factor * gammainc(peff, x) / x**peff
 
     def sr_r(smearing, r):
-        return r ** (-exponent) - lr_r(smearing, r)
+        return real(r) - lr_r(smearing, r)
+
+    def real(r):
+        return r ** (-exponent)
 
     def correction_background(smearing):
         factor = jnp.pi**1.5 * (2 * smearing**2) ** ((3 - exponent) / 2)
@@ -128,4 +189,11 @@ def inverse_power_law(exponent):
         phalf = exponent / 2
         return 1 / gamma(phalf + 1) / (2 * smearing**2) ** phalf
 
-    return RawPotential(sr_r, lr_r, lr_k2, correction_background, correction_self)
+    def correction_pbc(positions, cell, charges, pbc=None):
+        raise NotImplementedError(
+            "Mixed PBC correction is not implemented for this potential."
+        )
+
+    return RawPotential(
+        sr_r, lr_r, lr_k2, real, correction_background, correction_self, correction_pbc
+    )

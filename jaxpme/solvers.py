@@ -46,7 +46,9 @@ def pme(potential, interpolation_nodes=4, full_neighbor_list=False):
 
     rspace = partial(_rspace, potential, full_neighbor_list=full_neighbor_list)
 
-    def kspace(smearing, charges, reciprocal_cell, kgrid, kvectors, positions, volume):
+    def kspace(
+        smearing, charges, reciprocal_cell, kgrid, kvectors, positions, volume, cell, pbc
+    ):
         k2 = jax.lax.square(kvectors).sum(axis=-1)
 
         # got reciprocal_cell as input, like ewald, but the mesh needs the inverse
@@ -61,7 +63,7 @@ def pme(potential, interpolation_nodes=4, full_neighbor_list=False):
         potential_mesh = jnp.fft.irfftn(filter_hat, norm="forward", s=rho_mesh.shape)
         pot = mesh_to_points(potential_mesh, mesh) / volume
 
-        pot += potential.correction(smearing, charges, volume)
+        pot += potential.correction(smearing, charges, volume, positions, cell, pbc)
         return pot / 2
 
     return Solver(rspace, kspace)
@@ -70,7 +72,7 @@ def pme(potential, interpolation_nodes=4, full_neighbor_list=False):
 def ewald(potential, full_neighbor_list=False):
     rspace = partial(_rspace, potential, full_neighbor_list=full_neighbor_list)
 
-    def kspace(smearing, charges, kvectors, positions, volume):
+    def kspace(smearing, charges, kvectors, positions, volume, cell, pbc):
         # kvectors : [k, 3]
         # positions: [i, 3]
         k2 = jax.lax.square(kvectors).sum(axis=-1)  # -> [k]
@@ -90,7 +92,7 @@ def ewald(potential, full_neighbor_list=False):
 
         pot /= volume
 
-        pot += potential.correction(smearing, charges, volume)
+        pot += potential.correction(smearing, charges, volume, positions, cell, pbc)
         return pot / 2
 
     return Solver(rspace, kspace)

@@ -179,3 +179,90 @@ def test_mixed_pbc_calculator(cutoff):
     # Basic sanity: energy of neutral H2 (0D) with prefactor=1.0
     # should be something reasonable
     assert energy[1] < 0  # Binding energy for opposites
+
+
+@pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
+def test_halfspace_equivalence(cutoff):
+    """Test that halfspace optimization gives same results as full k-space."""
+    from jaxpme.batched_mixed.calculators import Ewald
+
+    structures = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index=":3")
+
+    # Full k-space calculator
+    calculator_full = Ewald(prefactor=1.0, halfspace=False)
+    charges_full, sr_batch_full, nonp_full, pbc_full = calculator_full.prepare(
+        structures, cutoff
+    )
+
+    # Halfspace calculator
+    calculator_half = Ewald(prefactor=1.0, halfspace=True)
+    charges_half, sr_batch_half, nonp_half, pbc_half = calculator_half.prepare(
+        structures, cutoff
+    )
+
+    # Verify k-vector count is reduced (roughly half)
+    # Count non-zero k-vectors (k=0 has G=0, padded k-vectors are also 0)
+    k2_full = (pbc_full.k_grid[0] ** 2).sum(axis=-1)
+    k2_half = (pbc_half.k_grid[0] ** 2).sum(axis=-1)
+    actual_k_full = (k2_full > 0).sum()
+    actual_k_half = (k2_half > 0).sum()
+    # Half-space should have fewer k-vectors
+    assert actual_k_half < actual_k_full
+
+    # Compare potentials (use rtol=1e-8 due to different FP operation ordering)
+    pot_full = calculator_full.potentials(charges_full, sr_batch_full, nonp_full, pbc_full)
+    pot_half = calculator_half.potentials(charges_half, sr_batch_half, nonp_half, pbc_half)
+    np.testing.assert_allclose(pot_full, pot_half, rtol=1e-8)
+
+    # Compare energy
+    E_full = calculator_full.energy(charges_full, sr_batch_full, nonp_full, pbc_full)
+    E_half = calculator_half.energy(charges_half, sr_batch_half, nonp_half, pbc_half)
+    np.testing.assert_allclose(E_full, E_half, rtol=1e-8)
+
+    # Compare forces
+    E_full2, F_full = calculator_full.energy_forces(
+        charges_full, sr_batch_full, nonp_full, pbc_full
+    )
+    E_half2, F_half = calculator_half.energy_forces(
+        charges_half, sr_batch_half, nonp_half, pbc_half
+    )
+    np.testing.assert_allclose(F_full, F_half, rtol=1e-8)
+
+    # Compare stress
+    E_full3, F_full3, S_full = calculator_full.energy_forces_stress(
+        charges_full, sr_batch_full, nonp_full, pbc_full
+    )
+    E_half3, F_half3, S_half = calculator_half.energy_forces_stress(
+        charges_half, sr_batch_half, nonp_half, pbc_half
+    )
+    np.testing.assert_allclose(S_full, S_half, rtol=1e-8)
+
+
+def test_halfspace_kvector_count():
+    """Test that halfspace generates correct number of k-vectors."""
+    from jaxpme.batched_mixed.kspace import count_halfspace_kvectors, generate_ewald_k_grid
+
+    for n in [4, 5, 8, 10]:
+        shape = (n, n, n)
+        full_count = n * n * n
+
+        # Generate full k-grid (includes k=0)
+        k_grid_full = generate_ewald_k_grid(shape)
+        assert k_grid_full.shape[0] == full_count
+
+        # Generate halfspace k-grid
+        k_grid_half = generate_ewald_k_grid(shape, halfspace=True)
+        half_count = count_halfspace_kvectors(shape)
+
+        # Count non-zero k-vectors in halfspace grid
+        k2_half = (k_grid_half**2).sum(axis=-1)
+        actual_k_count = (k2_half > 0).sum()
+        assert actual_k_count == half_count
+
+        # Half-space should have fewer k-vectors than full space
+        assert half_count < full_count
+
+        # Halfspace excludes k=0 and Nyquist, and takes one from each (k, -k) pair.
+        # For cubic grids, this is approximately (full_count - 1) / 2 - Nyquist count
+        # We just verify it's roughly half
+        assert half_count < full_count // 2 + full_count // 10  # rough upper bound

@@ -69,15 +69,19 @@ def pme(potential, interpolation_nodes=4, full_neighbor_list=False):
     return Solver(rspace, kspace)
 
 
-def ewald(potential, full_neighbor_list=False):
+def ewald(potential, full_neighbor_list=False, halfspace=False):
     rspace = partial(_rspace, potential, full_neighbor_list=full_neighbor_list)
+
+    # halfspace: sum over positive half of k-space and multiply by 2
+    # to account for (k, -k) symmetry
+    g_factor = 2 if halfspace else 1
 
     def kspace(smearing, charges, kvectors, positions, volume, cell, pbc):
         # kvectors : [k, 3]
         # positions: [i, 3]
         k2 = jax.lax.square(kvectors).sum(axis=-1)  # -> [k]
 
-        G = potential.lr(smearing, k2)
+        G = potential.lr(smearing, k2) * g_factor
         trig_args = kvectors @ (positions.T)  # -> [k, i]
 
         cos_all = jnp.cos(trig_args)

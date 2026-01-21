@@ -40,16 +40,21 @@ def generate_ewald_k_grid(shape, size=None, halfspace=False):
 
 
 def count_halfspace_kvectors(shape):
-    """Count k-vectors in the positive half-space (excluding k=0 and Nyquist)."""
-    fx = np.fft.fftfreq(shape[0]) * shape[0]
-    fy = np.fft.fftfreq(shape[1]) * shape[1]
-    fz = np.fft.fftfreq(shape[2]) * shape[2]
+    """Count k-vectors in the positive half-space (excluding k=0 and Nyquist).
 
-    kx, ky, kz = np.meshgrid(fx, fy, fz, indexing="ij")
-    kx, ky, kz = kx.flatten(), ky.flatten(), kz.flatten()
+    Closed-form formula derived from the halfspace condition:
+        (kx > 0) | ((kx == 0) & (ky > 0)) | ((kx == 0) & (ky == 0) & (kz > 0))
 
-    mask = (kx > 0) | ((kx == 0) & (ky > 0)) | ((kx == 0) & (ky == 0) & (kz > 0))
-    return mask.sum()
+    For FFT frequencies, the number of strictly positive values is (n-1)//2.
+    """
+    nx, ny, nz = shape
+    n_pos_x = (nx - 1) // 2
+    n_pos_y = (ny - 1) // 2
+    n_pos_z = (nz - 1) // 2
+    # kx > 0: all (ky, kz) combinations
+    # kx == 0, ky > 0: all kz values
+    # kx == 0, ky == 0, kz > 0: just the positive kz
+    return n_pos_x * ny * nz + n_pos_y * nz + n_pos_z
 
 
 def generate_ewald_kvectors(reciprocal_cell, k_grid):

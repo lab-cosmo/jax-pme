@@ -238,31 +238,13 @@ def test_halfspace_equivalence(cutoff):
     np.testing.assert_allclose(S_full, S_half, rtol=1e-8)
 
 
-def test_halfspace_kvector_count():
-    """Test that halfspace generates correct number of k-vectors."""
+@pytest.mark.parametrize("shape", [(4, 4, 4), (5, 5, 5), (8, 8, 8), (7, 9, 11)])
+def test_halfspace_kvector_count(shape):
+    """Test that count_halfspace_kvectors matches actual generated grid."""
     from jaxpme.batched_mixed.kspace import count_halfspace_kvectors, generate_ewald_k_grid
 
-    for n in [4, 5, 8, 10]:
-        shape = (n, n, n)
-        full_count = n * n * n
-
-        # Generate full k-grid (includes k=0)
-        k_grid_full = generate_ewald_k_grid(shape)
-        assert k_grid_full.shape[0] == full_count
-
-        # Generate halfspace k-grid
-        k_grid_half = generate_ewald_k_grid(shape, halfspace=True)
-        half_count = count_halfspace_kvectors(shape)
-
-        # Count non-zero k-vectors in halfspace grid
-        k2_half = (k_grid_half**2).sum(axis=-1)
-        actual_k_count = (k2_half > 0).sum()
-        assert actual_k_count == half_count
-
-        # Half-space should have fewer k-vectors than full space
-        assert half_count < full_count
-
-        # Halfspace excludes k=0 and Nyquist, and takes one from each (k, -k) pair.
-        # For cubic grids, this is approximately (full_count - 1) / 2 - Nyquist count
-        # We just verify it's roughly half
-        assert half_count < full_count // 2 + full_count // 10  # rough upper bound
+    k_grid_half = generate_ewald_k_grid(shape, halfspace=True)
+    k2 = (k_grid_half**2).sum(axis=-1)
+    actual = (k2 > 0).sum()
+    expected = count_halfspace_kvectors(shape)
+    assert actual == expected

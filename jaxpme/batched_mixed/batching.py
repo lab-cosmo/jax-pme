@@ -52,7 +52,7 @@ def get_batch(
     num_pairs_nonpbc=None,
     num_k=None,
     strategy="powers_of_2",
-    halfspace=False,
+    halfspace=True,
 ):
     _num_structures = len(samples)
     _num_atoms = []

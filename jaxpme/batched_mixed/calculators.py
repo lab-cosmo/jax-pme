@@ -13,7 +13,7 @@ def Ewald(
     exponent=1,
     prefactor=1.0,
     custom_potential=None,
-    halfspace=False,
+    halfspace=True,
 ):
     from jaxpme.solvers import ewald
 

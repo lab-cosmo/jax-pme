@@ -248,3 +248,73 @@ def test_halfspace_kvector_count(shape):
     actual = (k2 > 0).sum()
     expected = count_halfspace_kvectors(shape)
     assert actual == expected
+
+
+@pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
+def test_iplp_batched_vs_serial(cutoff):
+    """Test inverse power law potential with batched vs serial calculator."""
+    from jaxpme.batched_mixed.calculators import Ewald
+    from jaxpme.calculators import Ewald as SerialEwald
+    from jaxpme.potentials import inverse_power_law
+
+    structures = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index=":3")
+
+    iplp = inverse_power_law(1)
+
+    # Batched calculator
+    calculator = Ewald(custom_potential=iplp, prefactor=1.0)
+    charges, sr_batch, nonp_batch, pbc_batch = calculator.prepare(structures, cutoff)
+    energy_batched = calculator.energy(charges, sr_batch, nonp_batch, pbc_batch)
+
+    # Serial calculator for comparison
+    serial_calc = SerialEwald(custom_potential=iplp)
+    for i, atoms in enumerate(structures):
+        inputs = serial_calc.prepare(atoms, None, cutoff, cutoff / 8, cutoff / 4)
+        energy_serial = serial_calc.energy(*inputs)
+        np.testing.assert_allclose(energy_batched[i], energy_serial, rtol=1e-5)
+
+
+@pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
+def test_iplp_halfspace_equivalence(cutoff):
+    """Test that IPLP halfspace optimization gives same results as full k-space."""
+    from jaxpme.batched_mixed.calculators import Ewald
+    from jaxpme.potentials import inverse_power_law
+
+    structures = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index=":3")
+    iplp = inverse_power_law(1)
+
+    # Full k-space
+    calc_full = Ewald(custom_potential=iplp, halfspace=False)
+    charges_full, sr_full, nonp_full, pbc_full = calc_full.prepare(structures, cutoff)
+    E_full = calc_full.energy(charges_full, sr_full, nonp_full, pbc_full)
+
+    # Halfspace
+    calc_half = Ewald(custom_potential=iplp, halfspace=True)
+    charges_half, sr_half, nonp_half, pbc_half = calc_half.prepare(structures, cutoff)
+    E_half = calc_half.energy(charges_half, sr_half, nonp_half, pbc_half)
+
+    np.testing.assert_allclose(E_full, E_half, rtol=1e-8)
+
+
+def test_iplp_2d_pbc_returns_nan():
+    """Test that IPLP with 2D PBC returns NaN (unsupported)."""
+    from ase import Atoms
+
+    from jaxpme.batched_mixed.calculators import Ewald
+    from jaxpme.potentials import inverse_power_law
+
+    atoms_2d = Atoms(
+        "H2",
+        positions=[[5.0, 5.0, 5.0], [5.0, 5.0, 6.0]],
+        cell=np.diag([10.0, 10.0, 20.0]),
+        pbc=[True, True, False],
+    )
+    atoms_2d.set_initial_charges([1.0, -1.0])
+
+    iplp = inverse_power_law(1)
+    calculator = Ewald(custom_potential=iplp)
+    charges, sr_batch, nonp_batch, pbc_batch = calculator.prepare([atoms_2d], cutoff=5.0)
+    energy = calculator.energy(charges, sr_batch, nonp_batch, pbc_batch)
+
+    # Energy should be NaN for 2D PBC with IPLP
+    assert np.isnan(energy[0])

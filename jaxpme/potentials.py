@@ -127,6 +127,8 @@ def coulomb():
         charges,
         pbc,
     ):
+        # 2D correction based on: https://doi.org/10.1063/1.3216473
+
         is_2d = jnp.sum(pbc) == 2
         nonpbc = ~pbc
 

@@ -276,6 +276,11 @@ def get_kgrid_ewald(cell, lr_wavelength):
     return np.ones((int(ns[0]), int(ns[1]), int(ns[2])))
 
 
+def is_orthorhombic(cell, tol=1e-8):
+    off_diagonal = cell - np.diag(np.diag(cell))
+    return np.all(np.abs(off_diagonal) < tol)
+
+
 def to_structure(atoms, cutoff, dtype=np.float64):
     from vesin import ase_neighbor_list as neighbor_list
 
@@ -291,9 +296,9 @@ def to_structure(atoms, cutoff, dtype=np.float64):
     elif atoms.pbc.sum() == 2:
         # mixed pbc (2D)
         # -> require orthorhombic cell!
-        if not atoms.get_cell().orthorhombic:
+        if not is_orthorhombic(structure["cell"], tol=1e-8):
             raise ValueError(
-                "2D PBCs require an orthorhombic cell (diagonal 3x3)."
+                "2D PBCs require an orthorhombic cell (diagonal 3x3). "
                 f"Got cell=\n{structure['cell']}"
             )
         centers, others, D, S = neighbor_list("ijDS", atoms, cutoff)
@@ -385,3 +390,9 @@ assert next_size(31, strategy="powers_of_4") == 64
 assert next_size(31, strategy="multiples_of_17") == 34
 assert next_size(29, strategy="multiples") == 32
 assert next_size(11, strategy=15) == 15
+
+assert is_orthorhombic(np.eye(3) * 5.0)
+assert is_orthorhombic(np.diag([3.0, 4.0, 5.0]))
+assert not is_orthorhombic(np.array([[1.0, 0.1, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]))
+assert is_orthorhombic(np.eye(3) + 1e-8)  # within tolerance
+assert not is_orthorhombic(np.eye(3) + 1e-5)  # outside tolerance

@@ -180,3 +180,50 @@ def test_mixed_pbc_smoke():
     assert not sr_batch.pbc_mask[1]
     assert pbc_batch.structure_mask.sum() == 1
     assert nonp_batch.pair_mask.sum() > 0
+
+
+def test_orthorhombic_tolerance():
+    """Test that nearly-orthorhombic cells (within tolerance) are accepted for 2D PBC."""
+    import pytest
+    from ase import Atoms
+
+    from jaxpme.batched_mixed.batching import is_orthorhombic, prepare
+
+    # Cell with tiny off-diagonal elements (within 1e-8 tolerance) should work
+    cell_nearly_ortho = np.diag([10.0, 10.0, 20.0])
+    cell_nearly_ortho[0, 1] = 1e-10  # tiny off-diagonal, within tolerance
+
+    atoms_ok = Atoms(
+        "H2",
+        positions=[[5.0, 5.0, 5.0], [5.0, 5.0, 6.0]],
+        cell=cell_nearly_ortho,
+        pbc=[True, True, False],
+    )
+    atoms_ok.set_initial_charges([1.0, -1.0])
+
+    # Should not raise
+    prepare(atoms_ok, cutoff=3.0)
+
+    # Cell with off-diagonal elements outside tolerance should fail
+    cell_not_ortho = np.diag([10.0, 10.0, 20.0])
+    cell_not_ortho[0, 1] = 1e-5  # outside 1e-8 tolerance
+
+    atoms_bad = Atoms(
+        "H2",
+        positions=[[5.0, 5.0, 5.0], [5.0, 5.0, 6.0]],
+        cell=cell_not_ortho,
+        pbc=[True, True, False],
+    )
+    atoms_bad.set_initial_charges([1.0, -1.0])
+
+    with pytest.raises(ValueError, match="orthorhombic"):
+        prepare(atoms_bad, cutoff=3.0)
+
+    # Unit tests for is_orthorhombic helper
+    assert is_orthorhombic(np.eye(3) * 5.0)
+    assert is_orthorhombic(np.diag([3.0, 4.0, 5.0]))
+    assert not is_orthorhombic(
+        np.array([[1.0, 0.1, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    )
+    assert is_orthorhombic(np.eye(3) + 1e-11)  # within default tolerance
+    assert not is_orthorhombic(np.eye(3) + 1e-5)  # outside default tolerance

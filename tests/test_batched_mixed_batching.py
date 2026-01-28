@@ -189,9 +189,9 @@ def test_orthorhombic_tolerance():
 
     from jaxpme.batched_mixed.batching import is_orthorhombic, prepare
 
-    # Cell with tiny off-diagonal elements (within 1e-6 tolerance) should work
+    # Cell with tiny off-diagonal elements (within 1e-8 tolerance) should work
     cell_nearly_ortho = np.diag([10.0, 10.0, 20.0])
-    cell_nearly_ortho[0, 1] = 1e-8  # tiny off-diagonal, within tolerance
+    cell_nearly_ortho[0, 1] = 1e-10  # tiny off-diagonal, within tolerance
 
     atoms_ok = Atoms(
         "H2",
@@ -206,7 +206,7 @@ def test_orthorhombic_tolerance():
 
     # Cell with off-diagonal elements outside tolerance should fail
     cell_not_ortho = np.diag([10.0, 10.0, 20.0])
-    cell_not_ortho[0, 1] = 1e-5  # outside 1e-6 tolerance
+    cell_not_ortho[0, 1] = 1e-5  # outside 1e-8 tolerance
 
     atoms_bad = Atoms(
         "H2",
@@ -225,5 +225,5 @@ def test_orthorhombic_tolerance():
     assert not is_orthorhombic(
         np.array([[1.0, 0.1, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
     )
-    assert is_orthorhombic(np.eye(3) + 1e-8)  # within default tolerance
+    assert is_orthorhombic(np.eye(3) + 1e-11)  # within default tolerance
     assert not is_orthorhombic(np.eye(3) + 1e-5)  # outside default tolerance

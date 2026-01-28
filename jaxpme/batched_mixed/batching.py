@@ -276,7 +276,7 @@ def get_kgrid_ewald(cell, lr_wavelength):
     return np.ones((int(ns[0]), int(ns[1]), int(ns[2])))
 
 
-def is_orthorhombic(cell, tol=1e-6):
+def is_orthorhombic(cell, tol=1e-8):
     off_diagonal = cell - np.diag(np.diag(cell))
     return np.all(np.abs(off_diagonal) < tol)
 
@@ -296,7 +296,7 @@ def to_structure(atoms, cutoff, dtype=np.float64):
     elif atoms.pbc.sum() == 2:
         # mixed pbc (2D)
         # -> require orthorhombic cell!
-        if not is_orthorhombic(structure["cell"], tol=1e-6):
+        if not is_orthorhombic(structure["cell"], tol=1e-8):
             raise ValueError(
                 "2D PBCs require an orthorhombic cell (diagonal 3x3). "
                 f"Got cell=\n{structure['cell']}"

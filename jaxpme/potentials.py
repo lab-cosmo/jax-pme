@@ -195,7 +195,7 @@ def inverse_power_law(exponent):
         # 2D PBC correction not implemented for inverse power law!
         # -> returns 0 for 3D PBC, NaN for 2D PBC.
         is_3d = jnp.sum(pbc) == 3
-        zeros = jnp.zeros(positions.shape[0])
+        zeros = jnp.zeros(positions.shape[0], dtype=positions.dtype)
         nans = jnp.full(positions.shape[0], jnp.nan)
         return jax.lax.cond(is_3d, lambda: zeros, lambda: nans)
 

@@ -2,7 +2,7 @@ import numpy as np
 
 from collections import namedtuple
 
-from .kspace import generate_ewald_k_grid
+from .kspace import count_halfspace_kvectors, generate_ewald_k_grid
 
 Batch = namedtuple(
     "Batch",
@@ -52,6 +52,7 @@ def get_batch(
     num_pairs_nonpbc=None,
     num_k=None,
     strategy="powers_of_2",
+    halfspace=True,
 ):
     _num_structures = len(samples)
     _num_atoms = []
@@ -74,7 +75,11 @@ def get_batch(
         _num_pairs.append(len(structure["centers"]))
         if hasattr(lr, "k_grid"):
             _is_pbc.append(True)
-            _num_k.append(lr.k_grid.shape[0] * lr.k_grid.shape[1] * lr.k_grid.shape[2])
+            k_grid_shape = lr.k_grid.shape
+            if halfspace:
+                _num_k.append(count_halfspace_kvectors(k_grid_shape))
+            else:
+                _num_k.append(k_grid_shape[0] * k_grid_shape[1] * k_grid_shape[2])
         else:
             _is_pbc.append(False)
             _num_pairs_nonpbc.append(len(lr.centers))
@@ -166,7 +171,9 @@ def get_batch(
             pbc_atom_to_atom[pbc_idx, :num_n] = np.arange(atom_offset, atom_offset + num_n)
 
             k_grid_shape = lr.k_grid.shape
-            pbc_kgrid[pbc_idx] = generate_ewald_k_grid(k_grid_shape, size=num_k)
+            pbc_kgrid[pbc_idx] = generate_ewald_k_grid(
+                k_grid_shape, size=num_k, halfspace=halfspace
+            )
 
             pbc_atom_mask[pbc_idx, :num_n] = True
             pbc_structure_mask[pbc_idx] = True
@@ -394,5 +401,5 @@ assert next_size(11, strategy=15) == 15
 assert is_orthorhombic(np.eye(3) * 5.0)
 assert is_orthorhombic(np.diag([3.0, 4.0, 5.0]))
 assert not is_orthorhombic(np.array([[1.0, 0.1, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]))
-assert is_orthorhombic(np.eye(3) + 1e-8)  # within tolerance
-assert not is_orthorhombic(np.eye(3) + 1e-5)  # outside tolerance
+assert is_orthorhombic(np.eye(3) + 1e-9)  # within tolerance
+assert not is_orthorhombic(np.eye(3) + 1e-7)  # outside tolerance

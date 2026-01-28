@@ -13,6 +13,7 @@ def Ewald(
     exponent=1,
     prefactor=1.0,
     custom_potential=None,
+    halfspace=True,
 ):
     from jaxpme.solvers import ewald
 
@@ -21,7 +22,7 @@ def Ewald(
         exclusion_radius=None,
         custom_potential=custom_potential,
     )
-    solver = ewald(pot, full_neighbor_list=True)
+    solver = ewald(pot, full_neighbor_list=True, halfspace=halfspace)
 
     def potentials_fn(
         charges,
@@ -123,7 +124,8 @@ def Ewald(
                     smearing=smearing,
                 )
                 for atoms in atomss
-            ]
+            ],
+            halfspace=halfspace,
         )
 
     def energy_fn(

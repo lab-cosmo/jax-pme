@@ -191,10 +191,13 @@ def inverse_power_law(exponent):
         phalf = exponent / 2
         return 1 / gamma(phalf + 1) / (2 * smearing**2) ** phalf
 
-    def correction_pbc(positions, cell, charges, pbc=None):
-        raise NotImplementedError(
-            "Mixed PBC correction is not implemented for this potential."
-        )
+    def correction_pbc(positions, cell, charges, pbc):
+        # 2D PBC correction not implemented for inverse power law!
+        # -> returns 0 for 3D PBC, NaN for 2D PBC.
+        is_3d = jnp.sum(pbc) == 3
+        zeros = jnp.zeros(positions.shape[0], dtype=positions.dtype)
+        nans = jnp.full(positions.shape[0], jnp.nan)
+        return jax.lax.cond(is_3d, lambda: zeros, lambda: nans)
 
     return RawPotential(
         sr_r, lr_r, lr_k2, real, correction_background, correction_self, correction_pbc

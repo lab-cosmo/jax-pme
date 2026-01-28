@@ -134,12 +134,21 @@ def test_padding():
     assert sr_batch.atom_mask.sum() == 2
 
     # Lazy check to verify that all generated, non-padded k-vectors are different
-    total_kpoints = (
-        np.ceil(diags[0] / lr_wavelength)
-        * np.ceil(diags[1] / lr_wavelength)
-        * np.ceil(diags[2] / lr_wavelength)
+    # With halfspace=True (default), we have roughly half the k-vectors
+    from jaxpme.batched_mixed.kspace import count_halfspace_kvectors
+
+    k_shape = (
+        int(np.ceil(diags[0] / lr_wavelength)),
+        int(np.ceil(diags[1] / lr_wavelength)),
+        int(np.ceil(diags[2] / lr_wavelength)),
     )
-    assert total_kpoints == np.unique(periodic_batch.k_grid, axis=1).shape[1]
+    expected_kpoints = count_halfspace_kvectors(k_shape)
+    # Exclude zero-padding vectors when counting unique k-vectors
+    # k_grid has shape (num_pbc, num_k, 3); take first structure
+    k_grid = periodic_batch.k_grid[0]  # shape (num_k, 3)
+    nonzero_mask = np.any(k_grid != 0, axis=1)  # check each k-vector
+    actual_unique = np.unique(k_grid[nonzero_mask], axis=0).shape[0]
+    assert actual_unique == expected_kpoints
 
     # Verify atom_to_structure and pair_to_structure for padding
     padding_structure = 7  # num_structures - 1

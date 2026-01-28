@@ -401,5 +401,5 @@ assert next_size(11, strategy=15) == 15
 assert is_orthorhombic(np.eye(3) * 5.0)
 assert is_orthorhombic(np.diag([3.0, 4.0, 5.0]))
 assert not is_orthorhombic(np.array([[1.0, 0.1, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]))
-assert is_orthorhombic(np.eye(3) + 1e-8)  # within tolerance
-assert not is_orthorhombic(np.eye(3) + 1e-5)  # outside tolerance
+assert is_orthorhombic(np.eye(3) + 1e-9)  # within tolerance
+assert not is_orthorhombic(np.eye(3) + 1e-7)  # outside tolerance

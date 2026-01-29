@@ -1,0 +1,48 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # Check all PRs
+
+jobs:
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Minimum supported versions
+          - os: ubuntu-22.04
+            python-version: "3.10"
+            jax-version: "0.4.30"
+          # Latest versions
+          - os: ubuntu-22.04
+            python-version: "3.12"
+            jax-version: ""
+          - os: macos-14
+            python-version: "3.12"
+            jax-version: ""
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -n "${{ matrix.jax-version }}" ]; then
+            python -m pip install "jax==${{ matrix.jax-version }}"
+          else
+            python -m pip install jax
+          fi
+          python -m pip install pytest ase vesin numpy
+
+      - name: Run tests
+        run: python -m pytest tests/ -v

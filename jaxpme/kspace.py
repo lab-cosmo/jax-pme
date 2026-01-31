@@ -4,6 +4,48 @@ import jax.numpy as jnp
 from functools import partial
 
 
+def p3m_influence(kvectors, cell, ns, interpolation_nodes):
+    """Compute P3M influence function 1/U²(k).
+
+    The influence function corrects for the smoothing introduced by the
+    B-spline charge assignment. U²(k) is the Fourier transform of the
+    assignment function squared.
+
+    U²(k) = Π_{axis} [sinc(k_axis * h_axis / 2π)]^(2n)
+
+    where h_axis is the actual mesh spacing along each axis and n is
+    the number of interpolation nodes.
+
+    Args:
+        kvectors: k-vectors, shape [..., 3]
+        cell: unit cell matrix, shape [3, 3]
+        ns: mesh shape as array [nx, ny, nz]
+        interpolation_nodes: number of B-spline nodes (1-5)
+
+    Returns:
+        influence: 1/U²(k), same shape as kvectors[..., 0]
+    """
+    # Project k onto each cell axis direction to get the phase advance per mesh cell.
+    # For axis i: kh[i] = (k · cell[i]) / n[i]
+    # This is correct for non-orthogonal cells where cell vectors aren't axis-aligned.
+    kh = jnp.einsum("...j,ij->...i", kvectors, cell) / ns
+
+    # kh / (2π) for the sinc argument
+    # jnp.sinc(x) = sin(πx)/(πx), so sinc(kh/2π) gives us the right formula
+    kh_over_2pi = kh / (2 * jnp.pi)
+
+    # U²(k) = Π_axis sinc(kh_axis / 2π)^(2n)
+    # jnp.sinc(x) = sin(πx)/(πx)
+    sinc_vals = jnp.sinc(kh_over_2pi)  # shape [..., 3]
+    u_squared = jnp.prod(sinc_vals ** (2 * interpolation_nodes), axis=-1)
+
+    # Avoid division by zero at k=0
+    # At k=0, sinc(0)=1 so U²(0)=1, but we mask it out anyway in the kernel
+    u_squared = jnp.where(u_squared == 0, 1.0, u_squared)
+
+    return 1.0 / u_squared
+
+
 def get_reciprocal(cell):
     # note: reciprocal is in rows (like cell)
     return jnp.linalg.inv(cell).T * 2 * jnp.pi

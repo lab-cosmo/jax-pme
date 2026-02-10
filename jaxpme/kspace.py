@@ -51,27 +51,31 @@ def get_reciprocal(cell):
     return jnp.linalg.inv(cell).T * 2 * jnp.pi
 
 
-def get_kgrid_ewald(cell, lr_wavelength):
+def get_kgrid_ewald_shape(cell, lr_wavelength):
     # note: this seems odd, but is correct -- we have to consider the
     #       real-space length of the wave vectors
     ns = jnp.ceil(jnp.linalg.norm(cell, axis=-1) / lr_wavelength)
 
-    shape = (int(ns[0]), int(ns[1]), int(ns[2]))
-
-    # in principle, ShapeDtypeStruct would suffice here, but this
-    # does not play well with batching -- it can't be reshaped
-    return jnp.ones(shape)
+    return (int(ns[0]), int(ns[1]), int(ns[2]))
 
 
-def get_kgrid_mesh(cell, mesh_spacing):
-    start = jnp.array(get_kgrid_ewald(cell, mesh_spacing).shape)
+def get_kgrid_mesh_shape(cell, mesh_spacing):
+    start = jnp.array(get_kgrid_ewald_shape(cell, mesh_spacing))
     actual = 2 * start + 1
     # todo: revisit need for padding to powers of 2
     ns = jnp.array(2) ** (jnp.ceil(jnp.log2(actual)))
 
-    shape = (int(ns[0]), int(ns[1]), int(ns[2]))
+    return (int(ns[0]), int(ns[1]), int(ns[2]))
 
-    return jnp.ones(shape)
+
+def get_kgrid_ewald(cell, lr_wavelength):
+    # in principle, ShapeDtypeStruct would suffice here, but this
+    # does not play well with batching -- it can't be reshaped
+    return jnp.ones(get_kgrid_ewald_shape(cell, lr_wavelength))
+
+
+def get_kgrid_mesh(cell, mesh_spacing):
+    return jnp.ones(get_kgrid_mesh_shape(cell, mesh_spacing))
 
 
 @partial(jax.jit, static_argnums=(1, 2, 3))

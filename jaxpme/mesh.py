@@ -147,3 +147,162 @@ def lagrange(interpolation_nodes=4):
         ).sum(axis=0)
 
     return compute_weights, points_to_mesh, mesh_to_points
+
+
+def bspline(interpolation_nodes=4):
+    # P3M mesh interpolation using cardinal B-splines
+    #
+    # Same interface as lagrange() but uses B-spline basis functions.
+    # Supports interpolation_nodes = 1, 2, 3, 4, 5.
+    #
+    # Key difference from Lagrange: for B-splines, even n means particle
+    # position is at midpoint of two grid points, odd n means particle
+    # position is at nearest grid point. This is opposite to Lagrange.
+
+    assert interpolation_nodes in (1, 2, 3, 4, 5), "B-splines support n=1,2,3,4,5"
+    even = interpolation_nodes % 2 == 0
+
+    def compute_weights(inverse_cell, positions, ns):
+        ns_array = jnp.array(ns.shape)
+        positions_rel = ns_array * jnp.einsum("na, aA->nA", positions, inverse_cell)
+
+        if even:
+            # Even order: particle at midpoint between two grid points
+            positions_rel_idx = jnp.floor(positions_rel + 0.5) - 0.5
+            offsets = positions_rel - (positions_rel_idx + 0.5)
+        else:
+            # Odd order: particle at nearest grid point
+            positions_rel_idx = jnp.floor(positions_rel)
+            offsets = positions_rel - (positions_rel_idx + 0.5)
+
+        # Compute B-spline weights
+        # x is in [-0.5, 0.5] relative to reference point
+        x = offsets
+        x2 = x * x
+        x3 = x * x2
+        x4 = x2 * x2
+
+        if interpolation_nodes == 1:
+            interpolation_weights = jnp.ones((1,) + x.shape)
+        elif interpolation_nodes == 2:
+            interpolation_weights = jnp.stack(
+                [
+                    0.5 * (1 - 2 * x),
+                    0.5 * (1 + 2 * x),
+                ]
+            )
+        elif interpolation_nodes == 3:
+            interpolation_weights = jnp.stack(
+                [
+                    1 / 8 * (1 - 4 * x + 4 * x2),
+                    1 / 4 * (3 - 4 * x2),
+                    1 / 8 * (1 + 4 * x + 4 * x2),
+                ]
+            )
+        elif interpolation_nodes == 4:
+            interpolation_weights = jnp.stack(
+                [
+                    1 / 48 * (1 - 6 * x + 12 * x2 - 8 * x3),
+                    1 / 48 * (23 - 30 * x - 12 * x2 + 24 * x3),
+                    1 / 48 * (23 + 30 * x - 12 * x2 - 24 * x3),
+                    1 / 48 * (1 + 6 * x + 12 * x2 + 8 * x3),
+                ]
+            )
+        elif interpolation_nodes == 5:
+            interpolation_weights = jnp.stack(
+                [
+                    1 / 384 * (1 - 8 * x + 24 * x2 - 32 * x3 + 16 * x4),
+                    1 / 96 * (19 - 44 * x + 24 * x2 + 16 * x3 - 16 * x4),
+                    1 / 192 * (115 - 120 * x2 + 48 * x4),
+                    1 / 96 * (19 + 44 * x + 24 * x2 - 16 * x3 - 16 * x4),
+                    1 / 384 * (1 + 8 * x + 24 * x2 + 32 * x3 + 16 * x4),
+                ]
+            )
+
+        # Compute indices - for B-splines, center is at positions_rel_idx
+        # and we spread symmetrically
+        if even:
+            start_offset = -interpolation_nodes // 2 + 1
+        else:
+            start_offset = -(interpolation_nodes - 1) // 2
+
+        indices_to_interpolate = jnp.stack(
+            [
+                (positions_rel_idx + start_offset + i) % ns_array
+                for i in range(interpolation_nodes)
+            ],
+            axis=0,
+        ).astype(int)
+
+        # Generate shifts for x, y, z axes and flatten for indexing
+        x_shifts, y_shifts, z_shifts = jnp.meshgrid(
+            jnp.arange(interpolation_nodes),
+            jnp.arange(interpolation_nodes),
+            jnp.arange(interpolation_nodes),
+            indexing="ij",
+        )
+        x_shifts = x_shifts.flatten()
+        y_shifts = y_shifts.flatten()
+        z_shifts = z_shifts.flatten()
+
+        # Generate a flattened representation of all the indices
+        x_indices = indices_to_interpolate[x_shifts, :, 0]
+        y_indices = indices_to_interpolate[y_shifts, :, 1]
+        z_indices = indices_to_interpolate[z_shifts, :, 2]
+
+        return (
+            interpolation_weights,
+            x_shifts,
+            y_shifts,
+            z_shifts,
+            x_indices,
+            y_indices,
+            z_indices,
+            ns,
+        )
+
+    def points_to_mesh(particle_weights, mesh):
+        (
+            interpolation_weights,
+            x_shifts,
+            y_shifts,
+            z_shifts,
+            x_indices,
+            y_indices,
+            z_indices,
+            ns,
+        ) = mesh
+
+        rho_mesh = jnp.zeros(
+            ns.shape,
+            dtype=particle_weights.dtype,
+        )
+        rho_mesh = rho_mesh.at[x_indices, y_indices, z_indices].add(
+            particle_weights
+            * interpolation_weights[x_shifts, :, 0]
+            * interpolation_weights[y_shifts, :, 1]
+            * interpolation_weights[z_shifts, :, 2]
+        )
+
+        return rho_mesh
+
+    def mesh_to_points(mesh_vals, mesh):
+        (
+            interpolation_weights,
+            x_shifts,
+            y_shifts,
+            z_shifts,
+            x_indices,
+            y_indices,
+            z_indices,
+            _,
+        ) = mesh
+
+        return (
+            mesh_vals[x_indices, y_indices, z_indices]
+            * interpolation_weights[x_shifts, :, 0]
+            * interpolation_weights[y_shifts, :, 1]
+            * interpolation_weights[z_shifts, :, 2]
+        ).sum(axis=0)
+
+    return compute_weights, points_to_mesh, mesh_to_points

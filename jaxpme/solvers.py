@@ -69,6 +69,41 @@ def pme(potential, interpolation_nodes=4, full_neighbor_list=False):
     return Solver(rspace, kspace)
 
 
+def p3m(potential, interpolation_nodes=4, full_neighbor_list=False):
+    from .kspace import p3m_influence
+    from .mesh import bspline
+
+    compute_weights, points_to_mesh, mesh_to_points = bspline(interpolation_nodes)
+
+    rspace = partial(_rspace, potential, full_neighbor_list=full_neighbor_list)
+
+    def kspace(
+        smearing, charges, reciprocal_cell, kgrid, kvectors, positions, volume, cell, pbc
+    ):
+        k2 = jax.lax.square(kvectors).sum(axis=-1)
+
+        # got reciprocal_cell as input, like ewald, but the mesh needs the inverse
+        mesh = compute_weights(reciprocal_cell.T / (2 * jnp.pi), positions, kgrid)
+
+        rho_mesh = points_to_mesh(charges, mesh)
+        mesh_hat = jnp.fft.rfftn(rho_mesh, norm="backward", s=rho_mesh.shape)
+
+        # P3M: multiply kernel by influence function to correct for interpolation
+        ns = jnp.array(kgrid.shape)
+        influence = p3m_influence(kvectors, cell, ns, interpolation_nodes)
+        kernel = potential.lr(smearing, k2) * influence
+
+        filter_hat = mesh_hat * kernel
+
+        potential_mesh = jnp.fft.irfftn(filter_hat, norm="forward", s=rho_mesh.shape)
+        pot = mesh_to_points(potential_mesh, mesh) / volume
+
+        pot += potential.correction(smearing, charges, volume, positions, cell, pbc)
+        return pot / 2
+
+    return Solver(rspace, kspace)
+
+
 def ewald(potential, full_neighbor_list=False, halfspace=False):
     rspace = partial(_rspace, potential, full_neighbor_list=full_neighbor_list)
 

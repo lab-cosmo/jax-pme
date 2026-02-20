@@ -9,7 +9,7 @@ from ase import Atoms
 from ase.io import read
 from conftest import REFERENCE_STRUCTURES_DIR
 
-from jaxpme import PME, Ewald
+from jaxpme import P3M, PME, Ewald
 
 jax.config.update("jax_enable_x64", True)
 DTYPE = jnp.float64
@@ -32,6 +32,14 @@ def get_calculator(name, potential, prefactor=1.0):
 
             iplp = inverse_power_law(1)
             return PME(custom_potential=iplp, prefactor=prefactor)
+    elif name == "p3m":
+        if potential == "coulomb":
+            return P3M(prefactor=prefactor)
+        else:
+            from jaxpme.potentials import inverse_power_law
+
+            iplp = inverse_power_law(1)
+            return P3M(custom_potential=iplp, prefactor=prefactor)
 
 
 def generate_orthogonal_transformations():
@@ -296,7 +304,7 @@ def define_crystal(crystal_name="CsCl"):
     ],
 )
 @pytest.mark.parametrize("scaling_factor", [1 / 2.0353610, 1.0, 3.4951291])
-@pytest.mark.parametrize("calc_name", ["ewald", "pme"])
+@pytest.mark.parametrize("calc_name", ["ewald", "pme", "p3m"])
 @pytest.mark.parametrize("potential", ["coulomb", "iplp"])
 def test_madelung(crystal_name, scaling_factor, calc_name, potential):
     """
@@ -329,6 +337,13 @@ def test_madelung(crystal_name, scaling_factor, calc_name, potential):
         inputs = calc.prepare(atoms, charges, sr_cutoff, lr_wavelength, smearing)
         calculate = calc.energy
     elif calc_name == "pme":
+        sr_cutoff = 2 * scaling_factor
+        smearing = sr_cutoff / 5.0
+        rtol = 9e-4
+
+        inputs = calc.prepare(atoms, charges, sr_cutoff, smearing / 8, smearing)
+        calculate = calc.energy
+    elif calc_name == "p3m":
         sr_cutoff = 2 * scaling_factor
         smearing = sr_cutoff / 5.0
         rtol = 9e-4
@@ -408,7 +423,7 @@ def test_wigner(crystal_name, scaling_factor):
 @pytest.mark.parametrize("frame_index", [0, 1, 2])
 @pytest.mark.parametrize("scaling_factor", [0.4325, 1.3353610])
 @pytest.mark.parametrize("ortho", generate_orthogonal_transformations())
-@pytest.mark.parametrize("calc_name", ["pme", "ewald"])
+@pytest.mark.parametrize("calc_name", ["pme", "p3m", "ewald"])
 @pytest.mark.parametrize("potential", ["coulomb", "iplp"])
 @pytest.mark.parametrize("padded", [False, True])
 def test_random_structure(
@@ -458,6 +473,13 @@ def test_random_structure(
 
         rtol_e = 4.5e-3
         rtol_f = 5.0e-3
+    elif calc_name == "p3m":
+        inputs = calc.prepare(atoms, charges, sr_cutoff, smearing / 8, smearing)
+
+        rtol_e = 4.5e-3
+        rtol_f = 5.0e-3
+
+    rtol_stress = 5e-3
 
     if not padded:
         energy, forces, stress = calc.energy_forces_stress(*inputs)
@@ -466,7 +488,7 @@ def test_random_structure(
         np.testing.assert_allclose(forces, forces_target @ ortho, atol=0.0, rtol=rtol_f)
 
         stress_target = jnp.einsum("ab,aA,bB->AB", stress_target, ortho, ortho)
-        np.testing.assert_allclose(stress, stress_target, atol=0.0, rtol=2e-3)
+        np.testing.assert_allclose(stress, stress_target, atol=0.0, rtol=rtol_stress)
 
     else:
         num_extra_atoms = 3
@@ -500,4 +522,4 @@ def test_random_structure(
         np.testing.assert_allclose(forces, forces_target @ ortho, atol=0.0, rtol=rtol_f)
 
         stress_target = jnp.einsum("ab,aA,bB->AB", stress_target, ortho, ortho)
-        np.testing.assert_allclose(stress, stress_target, atol=0.0, rtol=2e-3)
+        np.testing.assert_allclose(stress, stress_target, atol=0.0, rtol=rtol_stress)

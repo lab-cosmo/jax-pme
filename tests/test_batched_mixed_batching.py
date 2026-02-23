@@ -207,7 +207,9 @@ def test_k_grid_shape_homogeneous():
     cutoff = 3.0
     k_grid_shape = (6, 6, 6)
 
-    samples = [prepare(atoms, cutoff, k_grid_shape=k_grid_shape) for atoms in [small, large]]
+    samples = [
+        prepare(atoms, cutoff, k_grid_shape=k_grid_shape) for atoms in [small, large]
+    ]
 
     # Both structures should produce k-grids with exactly shape (6, 6, 6)
     for sample in samples:

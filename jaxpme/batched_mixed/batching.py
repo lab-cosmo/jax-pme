@@ -227,7 +227,9 @@ def get_batch(
     return charges, sr_batch, nonperiodic_batch, periodic_batch
 
 
-def prepare(atoms, cutoff, lr_wavelength=None, smearing=None, k_grid_shape=None, dtype=np.float64):
+def prepare(
+    atoms, cutoff, lr_wavelength=None, smearing=None, k_grid_shape=None, dtype=np.float64
+):
     from jaxpme.kspace import lr_wavelength_for_kgrid_shape
 
     structure = to_structure(atoms, cutoff, dtype=dtype)

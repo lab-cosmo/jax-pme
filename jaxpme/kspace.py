@@ -59,6 +59,32 @@ def get_kgrid_ewald_shape(cell, lr_wavelength):
     return (int(ns[0]), int(ns[1]), int(ns[2]))
 
 
+def lr_wavelength_for_kgrid_shape(cell, k_grid_shape):
+    """Compute effective lr_wavelength for a target k-grid shape.
+
+    Inverts the relationship in get_kgrid_ewald_shape: given a target shape
+    (nx, ny, nz) and a cell, returns the largest lr_wavelength such that
+    get_kgrid_ewald_shape(cell, lr_wavelength) gives at most k_grid_shape
+    k-points per axis.
+
+    Use this to derive system-specific smearing when batching multiple systems
+    with a fixed target k-grid shape, keeping the k-vectors homogeneous across
+    the batch while adapting accuracy parameters per system.
+
+    Args:
+        cell: unit cell matrix, shape [3, 3]
+        k_grid_shape: target k-grid shape as (nx, ny, nz) or a single int
+
+    Returns:
+        lr_wavelength: effective minimum wavelength for smearing derivation
+    """
+    k_grid_shape = jnp.array(k_grid_shape)
+    if k_grid_shape.ndim == 0:
+        k_grid_shape = jnp.array([k_grid_shape, k_grid_shape, k_grid_shape])
+    cell_lengths = jnp.linalg.norm(cell, axis=-1)
+    return float(jnp.max(cell_lengths / k_grid_shape))
+
+
 def get_kgrid_mesh_shape(cell, mesh_spacing):
     start = jnp.array(get_kgrid_ewald_shape(cell, mesh_spacing))
     actual = 2 * start + 1

@@ -227,21 +227,31 @@ def get_batch(
     return charges, sr_batch, nonperiodic_batch, periodic_batch
 
 
-def prepare(atoms, cutoff, lr_wavelength=None, smearing=None, dtype=np.float64):
+def prepare(atoms, cutoff, lr_wavelength=None, smearing=None, k_grid_shape=None, dtype=np.float64):
+    from jaxpme.kspace import lr_wavelength_for_kgrid_shape
+
     structure = to_structure(atoms, cutoff, dtype=dtype)
 
     structure["charges"] = atoms.get_initial_charges()
 
-    # these values are rough estimates -- should be accurate, but
-    # are probably not pareto optimal wrt performance.
+    if k_grid_shape is not None:
+        if isinstance(k_grid_shape, int):
+            k_grid_shape = (k_grid_shape, k_grid_shape, k_grid_shape)
+        # derive system-specific lr_wavelength from the target shape and cell,
+        # keeping the k-grid homogeneous across the batch
+        if lr_wavelength is None:
+            lr_wavelength = lr_wavelength_for_kgrid_shape(structure["cell"], k_grid_shape)
+        if smearing is None:
+            smearing = lr_wavelength * 2.0
+    else:
+        # these values are rough estimates -- should be accurate, but
+        # are probably not pareto optimal wrt performance.
+        if lr_wavelength is None:
+            lr_wavelength = cutoff / 8.0
+        if smearing is None:
+            smearing = cutoff / 4.0
 
-    if lr_wavelength is None:
-        lr_wavelength = cutoff / 8.0
-
-    if smearing is None:
-        smearing = cutoff / 4.0
-
-    smearing, lr = to_lr(structure, lr_wavelength, smearing)
+    smearing, lr = to_lr(structure, lr_wavelength, smearing, k_grid_shape=k_grid_shape)
 
     structure["lr"] = lr
     if smearing is not None:
@@ -250,13 +260,16 @@ def prepare(atoms, cutoff, lr_wavelength=None, smearing=None, dtype=np.float64):
     return structure
 
 
-def to_lr(structure, lr_wavelength, smearing):
+def to_lr(structure, lr_wavelength, smearing, k_grid_shape=None):
     N = len(structure["positions"])
     pbc = structure["pbc"]
 
     if pbc.sum() in [2, 3]:
         cell = structure["cell"]
-        k_grid = get_kgrid_ewald(cell, lr_wavelength)
+        if k_grid_shape is not None:
+            k_grid = np.ones(k_grid_shape)
+        else:
+            k_grid = get_kgrid_ewald(cell, lr_wavelength)
         return smearing, Periodic(
             k_grid=k_grid,
             atom_to_atom=None,

@@ -261,7 +261,6 @@ def test_k_grid_shape_system_specific_smearing():
     sample_small = prepare(small, cutoff=3.0, k_grid_shape=k_grid_shape)
     sample_large = prepare(large, cutoff=3.0, k_grid_shape=k_grid_shape)
 
-    # smearing scales with cell size: larger cell -> larger lr_wavelength_eff -> larger smearing
     assert sample_large["smearing"] > sample_small["smearing"]
 
     # smearing should equal lr_wavelength_eff * 2.0

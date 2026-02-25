@@ -228,30 +228,32 @@ def get_batch(
 
 
 def prepare(
-    atoms, cutoff, lr_wavelength=None, smearing=None, k_grid_shape=None, dtype=np.float64
+    atoms, cutoff=None, lr_wavelength=None, smearing=None, k_grid_shape=None, dtype=np.float64
 ):
     from jaxpme.kspace import lr_wavelength_for_kgrid_shape
-
-    structure = to_structure(atoms, cutoff, dtype=dtype)
-
-    structure["charges"] = atoms.get_initial_charges()
 
     if k_grid_shape is not None:
         if isinstance(k_grid_shape, int):
             k_grid_shape = (k_grid_shape, k_grid_shape, k_grid_shape)
-        # derive system-specific lr_wavelength from the target shape and cell,
-        # keeping the k-grid homogeneous across the batch
         if lr_wavelength is None:
-            lr_wavelength = lr_wavelength_for_kgrid_shape(structure["cell"], k_grid_shape)
+            cell = atoms.get_cell().array.astype(dtype)
+            lr_wavelength = lr_wavelength_for_kgrid_shape(cell, k_grid_shape)
+        if cutoff is None:
+            cutoff = lr_wavelength * 8.0
         if smearing is None:
             smearing = lr_wavelength * 2.0
     else:
+        if cutoff is None:
+            raise ValueError("cutoff is required when k_grid_shape is not provided")
         # these values are rough estimates -- should be accurate, but
         # are probably not pareto optimal wrt performance.
         if lr_wavelength is None:
             lr_wavelength = cutoff / 8.0
         if smearing is None:
             smearing = cutoff / 4.0
+
+    structure = to_structure(atoms, cutoff, dtype=dtype)
+    structure["charges"] = atoms.get_initial_charges()
 
     smearing, lr = to_lr(structure, lr_wavelength, smearing, k_grid_shape=k_grid_shape)
 

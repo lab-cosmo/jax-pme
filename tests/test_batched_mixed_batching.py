@@ -350,3 +350,126 @@ def test_orthorhombic_tolerance():
     )
     assert is_orthorhombic(np.eye(3) + 1e-11)  # within default tolerance
     assert not is_orthorhombic(np.eye(3) + 1e-5)  # outside default tolerance
+
+
+def test_lr_wavelength_for_num_k_round_trip():
+    """Analytical lr_wavelength_for_num_k gives k-grid count close to target."""
+    from jaxpme.batched_mixed.kspace import count_halfspace_kvectors
+    from jaxpme.kspace import get_kgrid_ewald_shape, lr_wavelength_for_num_k
+
+    cells = [
+        np.eye(3) * 10.0,  # cubic
+        np.diag([5.0, 5.0, 20.0]),  # elongated
+        np.array([[10.0, 0.0, 0.0], [2.0, 9.0, 0.0], [0.0, 0.0, 8.0]]),  # skewed
+    ]
+
+    for cell in cells:
+        for num_k in [50, 200, 1000]:
+            lw = lr_wavelength_for_num_k(cell, num_k)
+            shape = get_kgrid_ewald_shape(cell, lw)
+            actual = count_halfspace_kvectors(shape)
+
+            # halfspace ≈ N_total/2 is approximate; allow some slack
+            ratio = actual / num_k
+            assert ratio > 0.75, f"ratio {ratio:.2f} too low for {cell}"
+            assert ratio < 1.5, f"ratio {ratio:.2f} too high for {cell}"
+
+
+def test_num_k_equivalence():
+    """num_k is a pure shorthand — identical to manually deriving lr_wavelength."""
+    import jax
+
+    jax.config.update("jax_enable_x64", True)
+
+    from ase.io import read
+    from conftest import REFERENCE_STRUCTURES_DIR
+
+    from jaxpme.batched_mixed.calculators import Ewald
+    from jaxpme.kspace import lr_wavelength_for_num_k
+
+    atoms = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index="0")
+    cell = atoms.get_cell().array
+
+    num_k = 200
+    lw = lr_wavelength_for_num_k(cell, num_k)
+    cutoff = lw * 8.0
+    smearing = lw * 2.0
+
+    calculator = Ewald(prefactor=1.0)
+
+    # Path A: num_k
+    charges_a, sr_a, nonp_a, pbc_a = calculator.prepare([atoms], num_k=num_k)
+    E_a, F_a, S_a = calculator.energy_forces_stress(charges_a, sr_a, nonp_a, pbc_a)
+
+    # Path B: explicit equivalent parameters
+    charges_b, sr_b, nonp_b, pbc_b = calculator.prepare(
+        [atoms], cutoff=cutoff, lr_wavelength=lw, smearing=smearing
+    )
+    E_b, F_b, S_b = calculator.energy_forces_stress(charges_b, sr_b, nonp_b, pbc_b)
+
+    np.testing.assert_allclose(E_a, E_b, rtol=1e-10)
+    np.testing.assert_allclose(F_a, F_b, rtol=1e-10)
+    np.testing.assert_allclose(S_a, S_b, rtol=1e-10)
+
+
+def test_num_k_accuracy():
+    """Energy/forces/stress with num_k match a well-converged reference."""
+    import jax
+
+    jax.config.update("jax_enable_x64", True)
+
+    from ase.io import read
+    from conftest import REFERENCE_STRUCTURES_DIR
+
+    from jaxpme.batched_mixed.calculators import Ewald
+    from jaxpme.batched_mixed.kspace import count_halfspace_kvectors
+    from jaxpme.kspace import get_kgrid_ewald_shape
+
+    cutoff_ref = 5.0
+    atoms = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index="0")
+
+    calculator = Ewald(prefactor=1.0)
+
+    # Reference: default heuristic
+    c1, sr1, nonp1, pbc1 = calculator.prepare([atoms], cutoff_ref)
+    E_ref, F_ref, S_ref = calculator.energy_forces_stress(c1, sr1, nonp1, pbc1)
+
+    # Compute the num_k that the default heuristic produces
+    lr_wavelength_ref = cutoff_ref / 8.0
+    shape_ref = get_kgrid_ewald_shape(atoms.get_cell().array, lr_wavelength_ref)
+    num_k_ref = count_halfspace_kvectors(shape_ref)
+
+    # num_k path with same budget
+    c2, sr2, nonp2, pbc2 = calculator.prepare([atoms], num_k=num_k_ref)
+    E_nk, F_nk, S_nk = calculator.energy_forces_stress(c2, sr2, nonp2, pbc2)
+
+    # Cutoff differs slightly (derived from analytical λ vs exact λ),
+    # so results won't be bit-identical, but should be close.
+    np.testing.assert_allclose(E_nk, E_ref, rtol=1e-3)
+    np.testing.assert_allclose(F_nk, F_ref, rtol=1e-3, atol=1e-5)
+    np.testing.assert_allclose(S_nk, S_ref, rtol=1e-3, atol=1e-5)
+
+
+def test_num_k_batching():
+    """Two structures with different cells, same num_k, batch correctly."""
+    from ase.build import bulk
+
+    from jaxpme.batched_mixed.batching import get_batch, prepare
+
+    small = bulk("NaCl", "rocksalt", a=4.0)
+    small.set_initial_charges(np.tile([1.0, -1.0], len(small) // 2))
+
+    large = bulk("NaCl", "rocksalt", a=8.0)
+    large.set_initial_charges(np.tile([1.0, -1.0], len(large) // 2))
+
+    num_k = 300
+    samples = [prepare(atoms, num_k=num_k) for atoms in [small, large]]
+
+    charges, sr_batch, nonperiodic_batch, periodic_batch = get_batch(samples)
+    assert periodic_batch.structure_mask.sum() == 2
+
+    # Both k-grids should have count approximately num_k
+    for pbc_idx in range(2):
+        nonzero = np.any(periodic_batch.k_grid[pbc_idx] != 0, axis=1).sum()
+        assert nonzero >= num_k, f"structure {pbc_idx}: {nonzero} < {num_k}"
+        assert nonzero < num_k * 2, f"structure {pbc_idx}: {nonzero} >> {num_k}"

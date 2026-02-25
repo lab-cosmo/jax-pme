@@ -233,29 +233,32 @@ def prepare(
     lr_wavelength=None,
     smearing=None,
     k_grid_shape=None,
+    num_k=None,
     dtype=np.float64,
 ):
-    from jaxpme.kspace import lr_wavelength_for_kgrid_shape
+    from jaxpme.kspace import lr_wavelength_for_kgrid_shape, lr_wavelength_for_num_k
 
-    if k_grid_shape is not None:
+    cell = atoms.get_cell().array.astype(dtype)
+
+    # resolve lr_wavelength from whichever specification was given
+    if num_k is not None:
+        lr_wavelength = lr_wavelength_for_num_k(cell, num_k)
+    elif k_grid_shape is not None:
         if isinstance(k_grid_shape, int):
             k_grid_shape = (k_grid_shape, k_grid_shape, k_grid_shape)
         if lr_wavelength is None:
-            cell = atoms.get_cell().array.astype(dtype)
             lr_wavelength = lr_wavelength_for_kgrid_shape(cell, k_grid_shape)
-        if cutoff is None:
-            cutoff = lr_wavelength * 8.0
-        if smearing is None:
-            smearing = lr_wavelength * 2.0
-    else:
-        if cutoff is None:
-            raise ValueError("cutoff is required when k_grid_shape is not provided")
-        # these values are rough estimates -- should be accurate, but
-        # are probably not pareto optimal wrt performance.
+    elif cutoff is not None:
         if lr_wavelength is None:
             lr_wavelength = cutoff / 8.0
-        if smearing is None:
-            smearing = cutoff / 4.0
+    else:
+        raise ValueError("one of cutoff, k_grid_shape, or num_k is required")
+
+    # derive cutoff and smearing from lr_wavelength if not given
+    if cutoff is None:
+        cutoff = lr_wavelength * 8.0
+    if smearing is None:
+        smearing = lr_wavelength * 2.0
 
     structure = to_structure(atoms, cutoff, dtype=dtype)
     structure["charges"] = atoms.get_initial_charges()

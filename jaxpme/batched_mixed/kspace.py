@@ -28,11 +28,13 @@ def generate_ewald_k_grid(shape, size=None, halfspace=True):
         mask = (kx > 0) | ((kx == 0) & (ky > 0)) | ((kx == 0) & (ky == 0) & (kz > 0))
         kx, ky, kz = kx[mask], ky[mask], kz[mask]
 
+    # todo: wtf is going on here?
     num_k = len(kx)
     if size is None:
         size = num_k
 
     k_grid = np.zeros((size, 3), dtype=float)
+    # todo: throw a warning -- we're just dropping k vectors here?!
     n = min(num_k, size)
     k_grid[:n, 0], k_grid[:n, 1], k_grid[:n, 2] = kx[:n], ky[:n], kz[:n]
 

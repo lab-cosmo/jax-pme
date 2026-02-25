@@ -59,6 +59,17 @@ def get_kgrid_ewald_shape(cell, lr_wavelength):
     return (int(ns[0]), int(ns[1]), int(ns[2]))
 
 
+def lr_wavelength_for_num_k(cell, num_k):
+    """Compute lr_wavelength that yields approximately num_k halfspace k-vectors.
+
+    Analytical inversion of get_kgrid_ewald_shape assuming halfspace ≈ N_total/2.
+    The ceil in get_kgrid_ewald_shape means the actual count will be slightly above
+    num_k (conservative in accuracy).
+    """
+    lengths = jnp.linalg.norm(cell, axis=-1)
+    return float((jnp.prod(lengths) / (2 * num_k)) ** (1 / 3))
+
+
 def lr_wavelength_for_kgrid_shape(cell, k_grid_shape):
     """Inverse of get_kgrid_ewald_shape: lr_wavelength consistent with a target k-grid.
 

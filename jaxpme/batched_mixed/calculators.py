@@ -112,7 +112,9 @@ def Ewald(
 
         return (real_space + k_space) * prefactor
 
-    def prepare_fn(atomss, cutoff=None, lr_wavelength=None, smearing=None, k_grid_shape=None):
+    def prepare_fn(
+        atomss, cutoff=None, lr_wavelength=None, smearing=None, k_grid_shape=None
+    ):
         from .batching import get_batch, prepare
 
         return get_batch(

@@ -228,7 +228,12 @@ def get_batch(
 
 
 def prepare(
-    atoms, cutoff=None, lr_wavelength=None, smearing=None, k_grid_shape=None, dtype=np.float64
+    atoms,
+    cutoff=None,
+    lr_wavelength=None,
+    smearing=None,
+    k_grid_shape=None,
+    dtype=np.float64,
 ):
     from jaxpme.kspace import lr_wavelength_for_kgrid_shape
 

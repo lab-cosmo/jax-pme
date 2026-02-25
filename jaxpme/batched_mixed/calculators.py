@@ -115,11 +115,13 @@ def Ewald(
     def prepare_fn(
         atomss,
         cutoff=None,
+        num_k=None,
         lr_wavelength=None,
         smearing=None,
-        k_grid_shape=None,
-        num_k=None,
     ):
+        if num_k is not None and not halfspace:
+            raise ValueError("num_k requires halfspace=True")
+
         from .batching import get_batch, prepare
 
         return get_batch(
@@ -127,10 +129,9 @@ def Ewald(
                 prepare(
                     atoms,
                     cutoff,
+                    num_k=num_k,
                     lr_wavelength=lr_wavelength,
                     smearing=smearing,
-                    k_grid_shape=k_grid_shape,
-                    num_k=num_k,
                 )
                 for atoms in atomss
             ],

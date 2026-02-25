@@ -230,40 +230,35 @@ def get_batch(
 def prepare(
     atoms,
     cutoff=None,
+    num_k=None,
     lr_wavelength=None,
     smearing=None,
-    k_grid_shape=None,
-    num_k=None,
     dtype=np.float64,
 ):
-    from jaxpme.kspace import lr_wavelength_for_kgrid_shape, lr_wavelength_for_num_k
+    from jaxpme.kspace import lr_wavelength_for_num_k
 
     cell = atoms.get_cell().array.astype(dtype)
 
-    # resolve lr_wavelength from whichever specification was given
     if num_k is not None:
         lr_wavelength = lr_wavelength_for_num_k(cell, num_k)
-    elif k_grid_shape is not None:
-        if isinstance(k_grid_shape, int):
-            k_grid_shape = (k_grid_shape, k_grid_shape, k_grid_shape)
-        if lr_wavelength is None:
-            lr_wavelength = lr_wavelength_for_kgrid_shape(cell, k_grid_shape)
+
+    if lr_wavelength is not None:
+        if cutoff is None:
+            cutoff = lr_wavelength * 8.0
+        if smearing is None:
+            smearing = lr_wavelength * 2.0
     elif cutoff is not None:
         if lr_wavelength is None:
             lr_wavelength = cutoff / 8.0
+        if smearing is None:
+            smearing = lr_wavelength * 2.0
     else:
-        raise ValueError("one of cutoff, k_grid_shape, or num_k is required")
-
-    # derive cutoff and smearing from lr_wavelength if not given
-    if cutoff is None:
-        cutoff = lr_wavelength * 8.0
-    if smearing is None:
-        smearing = lr_wavelength * 2.0
+        raise ValueError("one of cutoff or num_k is required")
 
     structure = to_structure(atoms, cutoff, dtype=dtype)
     structure["charges"] = atoms.get_initial_charges()
 
-    smearing, lr = to_lr(structure, lr_wavelength, smearing, k_grid_shape=k_grid_shape)
+    smearing, lr = to_lr(structure, lr_wavelength, smearing)
 
     structure["lr"] = lr
     if smearing is not None:
@@ -272,16 +267,13 @@ def prepare(
     return structure
 
 
-def to_lr(structure, lr_wavelength, smearing, k_grid_shape=None):
+def to_lr(structure, lr_wavelength, smearing):
     N = len(structure["positions"])
     pbc = structure["pbc"]
 
     if pbc.sum() in [2, 3]:
         cell = structure["cell"]
-        if k_grid_shape is not None:
-            k_grid = np.ones(k_grid_shape)
-        else:
-            k_grid = get_kgrid_ewald(cell, lr_wavelength)
+        k_grid = get_kgrid_ewald(cell, lr_wavelength)
         return smearing, Periodic(
             k_grid=k_grid,
             atom_to_atom=None,

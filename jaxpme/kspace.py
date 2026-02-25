@@ -70,18 +70,6 @@ def lr_wavelength_for_num_k(cell, num_k):
     return float((jnp.prod(lengths) / (2 * num_k)) ** (1 / 3))
 
 
-def lr_wavelength_for_kgrid_shape(cell, k_grid_shape):
-    """Inverse of get_kgrid_ewald_shape: lr_wavelength consistent with a target k-grid.
-
-    k_grid_shape can be a (nx, ny, nz) tuple or a single int (isotropic).
-    """
-    k_grid_shape = jnp.array(k_grid_shape)
-    if k_grid_shape.ndim == 0:
-        k_grid_shape = jnp.array([k_grid_shape, k_grid_shape, k_grid_shape])
-    cell_lengths = jnp.linalg.norm(cell, axis=-1)
-    return float(jnp.max(cell_lengths / k_grid_shape))
-
-
 def get_kgrid_mesh_shape(cell, mesh_spacing):
     start = jnp.array(get_kgrid_ewald_shape(cell, mesh_spacing))
     actual = 2 * start + 1

@@ -2,7 +2,7 @@ import numpy as np
 
 from collections import namedtuple
 
-from .kspace import count_halfspace_kvectors, generate_ewald_k_grid
+from .kspace import generate_ewald_k_grid
 
 Batch = namedtuple(
     "Batch",
@@ -52,7 +52,6 @@ def get_batch(
     num_pairs_nonpbc=None,
     num_k=None,
     strategy="powers_of_2",
-    halfspace=True,
 ):
     _num_structures = len(samples)
     _num_atoms = []
@@ -75,11 +74,7 @@ def get_batch(
         _num_pairs.append(len(structure["centers"]))
         if hasattr(lr, "k_grid"):
             _is_pbc.append(True)
-            k_grid_shape = lr.k_grid.shape
-            if halfspace:
-                _num_k.append(count_halfspace_kvectors(k_grid_shape))
-            else:
-                _num_k.append(k_grid_shape[0] * k_grid_shape[1] * k_grid_shape[2])
+            _num_k.append(lr.k_grid.shape[0])
         else:
             _is_pbc.append(False)
             _num_pairs_nonpbc.append(len(lr.centers))
@@ -170,10 +165,8 @@ def get_batch(
             pbc_structure_to_structure[pbc_idx] = idx
             pbc_atom_to_atom[pbc_idx, :num_n] = np.arange(atom_offset, atom_offset + num_n)
 
-            k_grid_shape = lr.k_grid.shape
-            pbc_kgrid[pbc_idx] = generate_ewald_k_grid(
-                k_grid_shape, size=num_k, halfspace=halfspace
-            )
+            n_k = lr.k_grid.shape[0]
+            pbc_kgrid[pbc_idx, :n_k] = lr.k_grid
 
             pbc_atom_mask[pbc_idx, :num_n] = True
             pbc_structure_mask[pbc_idx] = True
@@ -233,6 +226,7 @@ def prepare(
     num_k=None,
     lr_wavelength=None,
     smearing=None,
+    halfspace=True,
     dtype=np.float64,
 ):
     from jaxpme.kspace import lr_wavelength_for_num_k
@@ -258,7 +252,7 @@ def prepare(
     structure = to_structure(atoms, cutoff, dtype=dtype)
     structure["charges"] = atoms.get_initial_charges()
 
-    smearing, lr = to_lr(structure, lr_wavelength, smearing)
+    smearing, lr = to_lr(structure, lr_wavelength, smearing, halfspace=halfspace)
 
     structure["lr"] = lr
     if smearing is not None:
@@ -267,13 +261,15 @@ def prepare(
     return structure
 
 
-def to_lr(structure, lr_wavelength, smearing):
+def to_lr(structure, lr_wavelength, smearing, halfspace=True):
     N = len(structure["positions"])
     pbc = structure["pbc"]
 
     if pbc.sum() in [2, 3]:
         cell = structure["cell"]
-        k_grid = get_kgrid_ewald(cell, lr_wavelength)
+        ns = np.ceil(np.linalg.norm(cell, axis=-1) / lr_wavelength)
+        shape = (int(ns[0]), int(ns[1]), int(ns[2]))
+        k_grid = generate_ewald_k_grid(shape, halfspace=halfspace)
         return smearing, Periodic(
             k_grid=k_grid,
             atom_to_atom=None,
@@ -293,11 +289,6 @@ def to_lr(structure, lr_wavelength, smearing):
 
     else:
         raise ValueError(f"we support 3D, 2D, or no pbc. got {pbc}")
-
-
-def get_kgrid_ewald(cell, lr_wavelength):
-    ns = np.ceil(np.linalg.norm(cell, axis=-1) / lr_wavelength)
-    return np.ones((int(ns[0]), int(ns[1]), int(ns[2])))
 
 
 def is_orthorhombic(cell, tol=1e-8):

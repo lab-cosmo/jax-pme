@@ -132,10 +132,10 @@ def Ewald(
                     num_k=num_k,
                     lr_wavelength=lr_wavelength,
                     smearing=smearing,
+                    halfspace=halfspace,
                 )
                 for atoms in atomss
             ],
-            halfspace=halfspace,
         )
 
     def energy_fn(

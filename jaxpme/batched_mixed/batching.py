@@ -232,9 +232,16 @@ def prepare(
     from jaxpme.kspace import lr_wavelength_for_num_k
 
     cell = atoms.get_cell().array.astype(dtype)
+    pbc = atoms.get_pbc()
+
+    # For 2D PBC, shrink non-periodic cell vector before deriving parameters.
+    # This must happen first so num_k → lr_wavelength → cutoff are based on
+    # the effective cell, not a 100 Å vacuum cell.
+    positions = atoms.get_positions().astype(dtype)
+    effective_cell = shrink_2d_cell(cell, pbc, positions)
 
     if num_k is not None:
-        lr_wavelength = lr_wavelength_for_num_k(cell, num_k)
+        lr_wavelength = lr_wavelength_for_num_k(effective_cell, num_k)
 
     if lr_wavelength is not None:
         if cutoff is None:
@@ -250,7 +257,8 @@ def prepare(
         raise ValueError("one of cutoff or num_k is required")
 
     structure = to_structure(atoms, cutoff, dtype=dtype)
-    structure["charges"] = atoms.get_initial_charges()
+    structure["charges"] = atoms.get_initial_charges().astype(dtype)
+    structure["cell"] = effective_cell
 
     smearing, lr = to_lr(structure, lr_wavelength, smearing, halfspace=halfspace)
 
@@ -261,13 +269,42 @@ def prepare(
     return structure
 
 
+def shrink_2d_cell(cell, pbc, positions):
+    """Shrink non-periodic cell vector for 2D PBC to reduce k-grid size.
+
+    cell[k] is unused for real-space (cell_shifts[:,k]=0 when pbc[k]=False),
+    so modifying it only affects k-space and the slab correction. The 3D Ewald
+    + slab correction is valid for any h > thickness; residuals decay as
+    exp(-G_min * gap) where gap = h - thickness.
+    """
+    if pbc.sum() != 2:
+        return cell
+
+    nonpbc = ~pbc
+    k = np.argmax(nonpbc.astype(int))
+    v1, v2 = cell[(k + 1) % 3], cell[(k + 2) % 3]
+    n = np.cross(v1, v2)
+    n_hat = n / np.linalg.norm(n)
+    z = positions @ n_hat
+    thickness = z.max() - z.min()
+    h_cell = abs(np.dot(cell[k], n_hat))
+
+    # h_min: enough vacuum for slab correction accuracy.
+    # No cutoff dependency — pbc[k]=False means no periodic images in z.
+    h_min = 3 * max(thickness, 1.0)
+    if h_cell > h_min:
+        cell = cell.copy()
+        cell[k] = cell[k] * (h_min / h_cell)
+
+    return cell
+
+
 def to_lr(structure, lr_wavelength, smearing, halfspace=True):
     N = len(structure["positions"])
     pbc = structure["pbc"]
 
     if pbc.sum() in [2, 3]:
-        cell = structure["cell"]
-        ns = np.ceil(np.linalg.norm(cell, axis=-1) / lr_wavelength)
+        ns = np.ceil(np.linalg.norm(structure["cell"], axis=-1) / lr_wavelength)
         shape = (int(ns[0]), int(ns[1]), int(ns[2]))
         k_grid = generate_ewald_k_grid(shape, halfspace=halfspace)
         return smearing, Periodic(
@@ -291,11 +328,6 @@ def to_lr(structure, lr_wavelength, smearing, halfspace=True):
         raise ValueError(f"we support 3D, 2D, or no pbc. got {pbc}")
 
 
-def is_orthorhombic(cell, tol=1e-8):
-    off_diagonal = cell - np.diag(np.diag(cell))
-    return np.all(np.abs(off_diagonal) < tol)
-
-
 def to_structure(atoms, cutoff, dtype=np.float64):
     from vesin import ase_neighbor_list as neighbor_list
 
@@ -309,13 +341,6 @@ def to_structure(atoms, cutoff, dtype=np.float64):
         # fully periodic (3D)
         centers, others, D, S = neighbor_list("ijDS", atoms, cutoff)
     elif atoms.pbc.sum() == 2:
-        # mixed pbc (2D)
-        # -> require orthorhombic cell!
-        if not is_orthorhombic(structure["cell"], tol=1e-8):
-            raise ValueError(
-                "2D PBCs require an orthorhombic cell (diagonal 3x3). "
-                f"Got cell=\n{structure['cell']}"
-            )
         centers, others, D, S = neighbor_list("ijDS", atoms, cutoff)
 
     elif atoms.pbc.any():
@@ -405,9 +430,3 @@ assert next_size(31, strategy="powers_of_4") == 64
 assert next_size(31, strategy="multiples_of_17") == 34
 assert next_size(29, strategy="multiples") == 32
 assert next_size(11, strategy=15) == 15
-
-assert is_orthorhombic(np.eye(3) * 5.0)
-assert is_orthorhombic(np.diag([3.0, 4.0, 5.0]))
-assert not is_orthorhombic(np.array([[1.0, 0.1, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]))
-assert is_orthorhombic(np.eye(3) + 1e-9)  # within tolerance
-assert not is_orthorhombic(np.eye(3) + 1e-7)  # outside tolerance

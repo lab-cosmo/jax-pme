@@ -121,23 +121,26 @@ def coulomb():
     def correction_self(smearing):
         return jnp.sqrt(2.0 / jnp.pi) / smearing
 
-    def correction_pbc(
-        positions,
-        cell,
-        charges,
-        pbc,
-    ):
-        # 2D correction based on: https://doi.org/10.1063/1.3216473
+    def correction_pbc(positions, cell, charges, pbc):
+        # 2D slab correction (Yeh-Berkowitz / Pan-Hu)
+        # generalized to arbitrary (triclinic) cells.
+        # ref: https://doi.org/10.1063/1.3216473
 
         is_2d = jnp.sum(pbc) == 2
         nonpbc = ~pbc
 
-        # coordinates along the non-periodic axis
-        # note: orthorhombic case only!
-        z_i = jnp.sum(positions * nonpbc[None, :], axis=1)
+        # non-periodic axis index and two periodic lattice vectors
+        k = jnp.argmax(nonpbc.astype(jnp.int32))
+        v1 = cell[(k + 1) % 3]
+        v2 = cell[(k + 2) % 3]
 
-        cell_norms = jnp.linalg.norm(cell, axis=-1)  # shape (3,)
-        basis_len = jnp.sum(cell_norms * nonpbc)
+        # normal to the periodic plane
+        n = jnp.cross(v1, v2)
+        n_hat = n / jnp.linalg.norm(n)
+
+        # project positions and cell height onto the normal
+        z_i = positions @ n_hat
+        basis_len = jnp.abs(jnp.dot(cell[k], n_hat))
 
         charge_tot = jnp.sum(charges)
         M_axis = jnp.sum(charges * z_i)
@@ -149,7 +152,6 @@ def coulomb():
             - (charge_tot / 12.0) * (basis_len**2)
         )
 
-        # if not is_2d, this is zero
         return is_2d * E_slab_2d
 
     return RawPotential(

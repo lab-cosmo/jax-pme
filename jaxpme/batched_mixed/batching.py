@@ -257,7 +257,6 @@ def prepare(
         raise ValueError("one of cutoff or num_k is required")
 
     structure = to_structure(atoms, cutoff, dtype=dtype)
-    structure["charges"] = atoms.get_initial_charges().astype(dtype)
     structure["cell"] = effective_cell
 
     smearing, lr = to_lr(structure, lr_wavelength, smearing, halfspace=halfspace)
@@ -270,13 +269,10 @@ def prepare(
 
 
 def shrink_2d_cell(cell, pbc, positions):
-    """Shrink non-periodic cell vector for 2D PBC to reduce k-grid size.
+    """Shrink non-periodic cell vector to reduce k-grid size for 2D PBC.
 
-    cell[k] is unused for real-space (cell_shifts[:,k]=0 when pbc[k]=False),
-    so modifying it only affects k-space and the slab correction. The 3D Ewald
-    + slab correction is valid for any h > thickness; residuals decay as
-    exp(-G_min * gap) where G_min = 2π/L_max and gap = h - thickness.
-    We set gap = 1.5 * L_max so that the residual ≈ exp(-3π) ≈ 7e-5.
+    Safe because cell[k] is unused for real-space (cell_shifts[:,k]=0 when
+    pbc[k]=False). Gap = 1.5 * L_max gives residual ≈ exp(-3π) ≈ 7e-5.
     """
     if pbc.sum() != 2:
         return cell
@@ -338,12 +334,8 @@ def to_structure(atoms, cutoff, dtype=np.float64):
     structure["atomic_numbers"] = atoms.get_atomic_numbers().astype(int)
     structure["charges"] = atoms.get_initial_charges().astype(dtype)
 
-    if atoms.pbc.all():
-        # fully periodic (3D)
+    if atoms.pbc.sum() in (2, 3):
         centers, others, D, S = neighbor_list("ijDS", atoms, cutoff)
-    elif atoms.pbc.sum() == 2:
-        centers, others, D, S = neighbor_list("ijDS", atoms, cutoff)
-
     elif atoms.pbc.any():
         raise ValueError("we support: 3D pbc, 2D pbc, no pbc. received neither.")
     else:

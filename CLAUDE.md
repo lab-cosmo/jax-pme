@@ -38,9 +38,15 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
 
 ## Current Limitations
 - PME only supports 4-node Lagrange interpolation
-- Mixed PBC only works in batched implementations, not serial
+- Mixed PBC (2D) only works in batched implementations, not serial
 - Power-law potentials raise `NotImplementedError` for mixed PBC corrections
 - `calculators.py` has TODO for PME/P3M parameter tuning logic
+
+## 2D PBC (slab correction)
+- Supports arbitrary triclinic cells (not just orthorhombic)
+- `correction_pbc` in `potentials.py` projects onto the plane normal via cross product
+- `shrink_2d_cell` in `batching.py` reduces the non-periodic cell vector before deriving Ewald parameters, preventing large vacuum from inflating the k-grid
+- Vacuum gap formula: `h_min = thickness + 1.5 * L_max` (residual ≈ exp(-3π) ≈ 7e-5)
 
 ## Testing
 Run from the package root: `python -m pytest tests/ -v`
@@ -58,4 +64,4 @@ Run from the package root: `python -m pytest tests/ -v`
 ## Contributing
 
 - Always make a PR and do not break CI
-- Update CLAUDE.md alongside README.md
+- **Update CLAUDE.md and README.md before opening or merging a PR** — keep docs in sync with code changes

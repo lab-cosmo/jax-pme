@@ -28,7 +28,7 @@ inside the folder. The `dev` group contains development dependencies, and can be
 
 **The interface of this package is not yet fully designed. Please file an issue or get in touch via `marcel.langer@epfl.ch` if you have a particular use-case in mind and would like to chat about how to best support it.**
 
-Currently, the high-level API of this package is designed to compute (a) potentials, (b) total energy, (c) forces, and (d) stress for pairwise potentials of the form `1/r**p`, with `p=1` defining the important case of Coulomb interactions, i.e., electrostatics. The API is designed for standalone computation of these quantities, and is not particularly optimised for integration into machine learning model architectures yet. For example, it expects to be given positions and the cell as inputs, as opposed to graph edges, and it expects a half neighborlist.
+Currently, the high-level API of this package is designed to compute (a) potentials, (b) total energy, (c) forces, and (d) stress for pairwise potentials of the form `1/r**p`, with `p=1` defining the important case of Coulomb interactions, i.e., electrostatics. The API is designed for standalone computation of these quantities, and is not particularly optimised for integration into machine learning model architectures yet. For example, it expects to be given positions and the cell as inputs, as opposed to graph edges, and it expects a half neighborlist by default (`full_neighbor_list=False`).
 
 ### Design
 
@@ -52,13 +52,14 @@ Calculator = namedtuple(
 They are instantiated just like any other class, by calling
 
 ```python
-from jaxpme import Ewald, PME
+from jaxpme import Ewald, PME, P3M
 
 calculator = Ewald(
 	exponent=1,  # corresponds to electrostatics
 	exclusion_radius=None,  # if this is not None, purely long-range potentials are computed (see preprint)
 	prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
 	custom_potential=None,  # mostly for testing -- you can define custom potential functions
+	full_neighbor_list=False,  # set True if your neighborlist includes both i->j and j->i
 	)
 
 calculator = PME(
@@ -67,6 +68,16 @@ calculator = PME(
     prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
     interpolation_nodes=4,  # currently only 4 is supported
     custom_potential=None,  # mostly for testing -- you can define custom potential functions
+    full_neighbor_list=False,  # set True if your neighborlist includes both i->j and j->i
+	)
+
+calculator = P3M(
+    exponent=1,  # corresponds to electrostatics
+    exclusion_radius=None,  # if this is not None, purely long-range potentials are computed (see preprint)
+    prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
+    interpolation_nodes=4,  # B-spline interpolation, supports 1-5
+    custom_potential=None,  # mostly for testing -- you can define custom potential functions
+    full_neighbor_list=False,  # set True if your neighborlist includes both i->j and j->i
 	)
 
 # -> calculator.prepare, .energy, etc ... can be called
@@ -74,7 +85,7 @@ calculator = PME(
 
 The functions exposed by `Calculator` consist of a `prepare` function that arranges all the inputs required for calculations of some input structure, including determining the shape of the reciprocal-space grid, and a bundle of functions that then execute different calculations.
 
-`prepare` expects the arguments `atoms` (`ase.Atoms` instance), `charges`, `cutoff` (for the real-space neighborlist), `mesh_spacing` (PME) or `lr_cutoff` (Ewald) (defining the resolution/cutoff in reciprocal space), `smearing` (range separation parameter, related to `cutoff`). The parameters can be tuned with `torch-pme` or set heuristically (see `torch-pme` docs). It returns a tuple of inputs `charges, *graph, k_grid, smearing`, where `*graph` collects `cell`, `positions`, neighbor indices `i` and `j`, and `cell_shifts`. `k_grid` is a dummy array that defines the *shape* of the reciprocal-space grid via its `shape`, its values are not used. `prepare` is not `jax.jit`-able as it returns variable-shape output.
+`prepare` expects the arguments `atoms` (`ase.Atoms` instance), `charges`, `cutoff` (for the real-space neighborlist), `mesh_spacing` (PME/P3M) or `lr_wavelength` (Ewald) (defining the resolution/cutoff in reciprocal space), `smearing` (range separation parameter, related to `cutoff`). The parameters can be tuned with `torch-pme` or set heuristically (see `torch-pme` docs). It returns a tuple of inputs `charges, *graph, k_grid, smearing`, where `*graph` collects `cell`, `positions`, neighbor indices `i` and `j`, and `cell_shifts`. `k_grid` is a dummy array that defines the *shape* of the reciprocal-space grid via its `shape`, its values are not used. `prepare` is not `jax.jit`-able as it returns variable-shape output.
 
 The following calculation functions are implemented:
 
@@ -83,7 +94,7 @@ The following calculation functions are implemented:
 - `energy_forces`: Energy as above, and its derivative with respect to positions.
 - `energy_forces_stress`: The above, with additionally the stress.
 
-All these other functions can be `jit`-ed and support function transformations like `vmap` and `grad`. They optionally accept boolean mask arrays `atom_mask` and `pair_mask` to exclude irrelevant inputs from the output, typically introduced by padding. We currently do not support padding the $k$-grid, you should simply use the biggest grid consistently. Make sure that padding indices do not connect non-padded edges.
+All these other functions can be `jit`-ed and support function transformations like `vmap` and `grad`. They optionally accept boolean mask arrays `atom_mask` and `pair_mask` to exclude irrelevant inputs from the output, typically introduced by padding. We currently do not support padding the $k$-grid, you should simply use the biggest grid consistently. Make sure that padding indices do not connect non-padded edges. Additionally, `Ewald`'s `potentials_fn` accepts optional `distances` (to skip recomputing pairwise distances) and `pbc` kwargs; `PME` and `P3M` accept `pbc`.
 
 ***
 
@@ -91,9 +102,21 @@ The *low-level* API is not yet ready for public consumption. We split the calcul
 
 ### Recommendations
 
-We find in benchmarks that for moderately-sized systems up to a few thousand atoms, the asymptotically less efficient `Ewald` method works best. For large systems, `PME` is preferable, as it scales $O(N \log N)$. **Note that PME is not smooth in the forces -- be careful when using it for dynamics**. The P3M method, which fixes this and is also more accurate, will be implemented soon.
+We find in benchmarks that for moderately-sized systems up to a few thousand atoms, the asymptotically less efficient `Ewald` method works best. For large systems, `PME` and `P3M` are preferable, as they scale $O(N \log N)$. **Note that PME is not smooth in the forces -- be careful when using it for dynamics**. `P3M` uses B-spline interpolation (with `interpolation_nodes` 1-5) and an influence function correction, giving smoother forces and better accuracy. **Use P3M for molecular dynamics.**
 
 It is *highly* recommended to tune convergence parameters for your specific system. `torchpme.utils.tune_ewald` (and its `pme` version) exists for this purpose. Paramters can be used directly in `jax-pme`. You should typically tune the parameters for the largest system in a given dataset.
+
+### Batched computation
+
+**Warning: The batched API is highly experimental and subject to breaking changes. Use at your own risk.**
+
+For computing energies/forces across multiple structures (e.g. for training), batched implementations are available:
+
+```python
+from jaxpme.batched_mixed import Ewald  # or jaxpme.batched_flat
+```
+
+These accept lists of `ase.Atoms` in `prepare` and handle padding/masking internally. Currently, only batched `Ewald` is implemented.
 
 ## Development
 

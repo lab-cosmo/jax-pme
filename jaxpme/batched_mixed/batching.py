@@ -237,8 +237,11 @@ def prepare(
     # For 2D PBC, shrink non-periodic cell vector before deriving parameters.
     # This must happen first so num_k → lr_wavelength → cutoff are based on
     # the effective cell, not a 100 Å vacuum cell.
-    positions = atoms.get_positions().astype(dtype)
-    effective_cell = shrink_2d_cell(cell, pbc, positions)
+    if pbc.sum() == 2:
+        positions = atoms.get_positions().astype(dtype)
+        effective_cell = shrink_2d_cell(cell, pbc, positions)
+    else:
+        effective_cell = cell
 
     if num_k is not None:
         lr_wavelength = lr_wavelength_for_num_k(effective_cell, num_k)

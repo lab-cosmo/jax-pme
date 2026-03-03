@@ -44,7 +44,6 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
 
 ## Testing
 Run from the package root: `python -m pytest tests/ -v`
-- 484 tests, all pass
 - Reference structures in `tests/reference_structures/coulomb_test_frames.xyz`
 - Tests validate against Madelung constants and GROMACS reference data
 

@@ -108,6 +108,8 @@ It is *highly* recommended to tune convergence parameters for your specific syst
 
 ### Batched computation
 
+**Warning: The batched API is highly experimental and subject to breaking changes. Use at your own risk.**
+
 For computing energies/forces across multiple structures (e.g. for training), batched implementations are available:
 
 ```python

@@ -112,7 +112,16 @@ def Ewald(
 
         return (real_space + k_space) * prefactor
 
-    def prepare_fn(atomss, cutoff, lr_wavelength=None, smearing=None):
+    def prepare_fn(
+        atomss,
+        cutoff=None,
+        num_k=None,
+        lr_wavelength=None,
+        smearing=None,
+    ):
+        if num_k is not None and not halfspace:
+            raise ValueError("num_k requires halfspace=True")
+
         from .batching import get_batch, prepare
 
         return get_batch(
@@ -120,12 +129,13 @@ def Ewald(
                 prepare(
                     atoms,
                     cutoff,
+                    num_k=num_k,
                     lr_wavelength=lr_wavelength,
                     smearing=smearing,
+                    halfspace=halfspace,
                 )
                 for atoms in atomss
             ],
-            halfspace=halfspace,
         )
 
     def energy_fn(

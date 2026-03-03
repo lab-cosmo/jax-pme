@@ -12,7 +12,7 @@ import jax.numpy as jnp
 # to batch across very uneven k-grids.
 
 
-def generate_ewald_k_grid(shape, size=None, halfspace=True):
+def generate_ewald_k_grid(shape, halfspace=True):
     fx = np.fft.fftfreq(shape[0]) * shape[0]
     fy = np.fft.fftfreq(shape[1]) * shape[1]
     fz = np.fft.fftfreq(shape[2]) * shape[2]
@@ -28,15 +28,7 @@ def generate_ewald_k_grid(shape, size=None, halfspace=True):
         mask = (kx > 0) | ((kx == 0) & (ky > 0)) | ((kx == 0) & (ky == 0) & (kz > 0))
         kx, ky, kz = kx[mask], ky[mask], kz[mask]
 
-    num_k = len(kx)
-    if size is None:
-        size = num_k
-
-    k_grid = np.zeros((size, 3), dtype=float)
-    n = min(num_k, size)
-    k_grid[:n, 0], k_grid[:n, 1], k_grid[:n, 2] = kx[:n], ky[:n], kz[:n]
-
-    return k_grid
+    return np.stack([kx, ky, kz], axis=1)
 
 
 def count_halfspace_kvectors(shape):

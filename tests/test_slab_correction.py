@@ -211,10 +211,13 @@ def test_tiling_square_lattice(tiling_name, P):
     E_prim = _batched_energy([atoms_prim])
     E_sc = _batched_energy([atoms_sc])
 
+    # Tolerance 5e-4: different unit cells get different shrunk cell heights
+    # (h_min depends on L_max), leading to different slab correction residuals
+    # ~exp(-G_min * gap). The residual is ~1e-4 for α=1.5.
     np.testing.assert_allclose(
         float(E_sc[0]) / n_fu,
         float(E_prim[0]),
-        rtol=2e-5,
+        rtol=5e-4,
         err_msg=f"Tiling '{tiling_name}' (n_fu={n_fu}) failed",
     )
 
@@ -249,10 +252,11 @@ def test_tiling_hexagonal_lattice(tiling_name, P):
     E_prim = _batched_energy([atoms_prim])
     E_sc = _batched_energy([atoms_sc])
 
+    # See test_tiling_square_lattice for tolerance rationale.
     np.testing.assert_allclose(
         float(E_sc[0]) / n_fu,
         float(E_prim[0]),
-        rtol=2e-5,
+        rtol=5e-4,
         err_msg=f"Tiling '{tiling_name}' (n_fu={n_fu}) failed",
     )
 
@@ -407,10 +411,10 @@ def test_cell_shrink_large_vacuum():
     atoms = _make_slab_atoms(cell, positions, [1.0, -1.0], [True, True, False])
     structure = prepare(atoms, cutoff=cutoff)
 
-    # Cell should be shrunk: h_min = 3 * max(3, 1) = 9
+    # Cell should be shrunk: h_min = 3 + 1.5*10 = 18
     h_shrunk = abs(structure["cell"][2, 2])
     assert h_shrunk < 100.0, "cell should have been shrunk"
-    assert h_shrunk >= 9.0 - 0.01, "cell should be at least h_min"
+    assert h_shrunk >= 18.0 - 0.01, "cell should be at least h_min"
 
     # k-grid should be much smaller than with original cell
     lr_wavelength = cutoff / 8.0
@@ -432,10 +436,10 @@ def test_cell_shrink_nonorthorhombic():
     structure = prepare(atoms, cutoff=5.0)
 
     # Normal is z-hat for this cell, thickness = 5
+    # L_max = ||[10,3,0]|| ≈ 10.44, h_min = 5 + 1.5*10.44 ≈ 20.66
     h_shrunk = np.linalg.norm(structure["cell"][2])
     assert h_shrunk < 80.0
-    # h_min = 3 * max(5, 1) = 15
-    assert h_shrunk >= 15.0 - 0.01
+    assert h_shrunk >= 20.0 - 0.01
 
 
 def test_cell_shrink_preserves_direction():
@@ -464,7 +468,7 @@ def test_cell_no_shrink_when_small():
     atoms = _make_slab_atoms(cell, positions, [1.0, -1.0], [True, True, False])
     prepare(atoms, cutoff=5.0)  # just verify it doesn't crash
 
-    # h_min = 3 * max(3, 1) = 9, h_cell = 9 is NOT > h_min, so no shrink
+    # h_min = 3 + 1.5*10 = 18, h_cell = 9 < h_min, so no shrink
     cell2 = np.diag([10.0, 10.0, 9.0])
     atoms2 = _make_slab_atoms(cell2, positions, [1.0, -1.0], [True, True, False])
     structure2 = prepare(atoms2, cutoff=5.0)

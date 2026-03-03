@@ -275,7 +275,8 @@ def shrink_2d_cell(cell, pbc, positions):
     cell[k] is unused for real-space (cell_shifts[:,k]=0 when pbc[k]=False),
     so modifying it only affects k-space and the slab correction. The 3D Ewald
     + slab correction is valid for any h > thickness; residuals decay as
-    exp(-G_min * gap) where gap = h - thickness.
+    exp(-G_min * gap) where G_min = 2π/L_max and gap = h - thickness.
+    We set gap = 1.5 * L_max so that the residual ≈ exp(-3π) ≈ 7e-5.
     """
     if pbc.sum() != 2:
         return cell
@@ -289,9 +290,9 @@ def shrink_2d_cell(cell, pbc, positions):
     thickness = z.max() - z.min()
     h_cell = abs(np.dot(cell[k], n_hat))
 
-    # h_min: enough vacuum for slab correction accuracy.
-    # No cutoff dependency — pbc[k]=False means no periodic images in z.
-    h_min = 3 * max(thickness, 1.0)
+    # gap ∝ L_max ensures residual is independent of thickness/L_max ratio.
+    L_max = max(float(np.linalg.norm(v1)), float(np.linalg.norm(v2)))
+    h_min = thickness + 1.5 * L_max
     if h_cell > h_min:
         cell = cell.copy()
         cell[k] = cell[k] * (h_min / h_cell)

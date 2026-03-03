@@ -7,6 +7,8 @@ import math
 import pytest
 from ase import Atoms
 from ase.build import make_supercell
+from ase.io import read
+from conftest import REFERENCE_STRUCTURES_DIR
 
 jax.config.update("jax_enable_x64", True)
 DTYPE = jnp.float64
@@ -510,3 +512,53 @@ def test_num_k_with_large_vacuum():
 
     # The derived smearing should be reasonable (not inflated by vacuum)
     assert structure["smearing"] < 5.0  # would be ~7.4 without shrinking
+
+
+# -- MAD-1.5 2D reference structures --
+
+MAD_2D_FRAMES = read(str(REFERENCE_STRUCTURES_DIR / "mad15_2d_subset.xyz"), index=":")
+
+
+@pytest.mark.parametrize("frame_idx", range(len(MAD_2D_FRAMES)))
+def test_mad15_shrink_vs_noshrink(frame_idx):
+    """Energy with shrunk vacuum matches unshrunk 100 A cell on real structures."""
+    from unittest.mock import patch
+
+    atoms = MAD_2D_FRAMES[frame_idx]
+    cutoff = 5.0
+
+    E_shrunk = float(_batched_energy([atoms], cutoff=cutoff)[0])
+
+    with patch("jaxpme.batched_mixed.batching.shrink_2d_cell", lambda c, p, pos: c):
+        E_noshrink = float(_batched_energy([atoms], cutoff=cutoff)[0])
+
+    np.testing.assert_allclose(E_shrunk, E_noshrink, rtol=5e-4)
+
+
+@pytest.mark.parametrize("frame_idx", range(len(MAD_2D_FRAMES)))
+def test_mad15_finite_forces(frame_idx):
+    """Forces are finite and sum to ~zero on real 2D structures."""
+    atoms = MAD_2D_FRAMES[frame_idx]
+    _, forces = _batched_energy_forces([atoms], cutoff=5.0)
+    N = len(atoms)
+    forces = np.array(forces[:N])
+
+    assert np.all(np.isfinite(forces))
+    np.testing.assert_allclose(forces.sum(axis=0), 0.0, atol=1e-8)
+
+
+@pytest.mark.parametrize("frame_idx", range(len(MAD_2D_FRAMES)))
+def test_mad15_nonneutral_finite(frame_idx):
+    """Non-neutral 2D slabs produce finite energies and forces."""
+    atoms = MAD_2D_FRAMES[frame_idx].copy()
+    charges = atoms.get_initial_charges().copy()
+    charges[0] += 0.5  # break neutrality
+    atoms.set_initial_charges(charges)
+
+    energy = float(_batched_energy([atoms], cutoff=5.0)[0])
+    assert np.isfinite(energy)
+
+    _, forces = _batched_energy_forces([atoms], cutoff=5.0)
+    forces = np.array(forces[: len(atoms)])
+    assert np.all(np.isfinite(forces))
+    np.testing.assert_allclose(forces.sum(axis=0), 0.0, atol=1e-8)

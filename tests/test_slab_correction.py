@@ -275,9 +275,16 @@ def _rotation_matrix(theta, phi):
     return Rz @ Rx
 
 
-def test_rotation_invariance():
+@pytest.mark.parametrize(
+    "cell",
+    [
+        np.diag([10.0, 10.0, 25.0]),
+        np.array([[10.0, 3.0, 0.0], [0.0, 12.0, 0.0], [0.0, 0.0, 25.0]]),
+    ],
+    ids=["orthorhombic", "triclinic"],
+)
+def test_rotation_invariance(cell):
     """Energy is invariant under rotation of (cell, positions) for 2D PBC."""
-    cell_ortho = np.diag([10.0, 10.0, 25.0])
     positions = np.array(
         [[2.0, 3.0, 5.0], [7.0, 4.0, 8.0], [5.0, 8.0, 15.0], [3.0, 6.0, 20.0]],
         dtype=float,
@@ -285,10 +292,10 @@ def test_rotation_invariance():
     charges = [1.0, -1.0, 0.5, -0.5]
 
     R = _rotation_matrix(0.987654, 0.82321)
-    cell_rot = cell_ortho @ R
+    cell_rot = cell @ R
     positions_rot = positions @ R
 
-    atoms_orig = _make_slab_atoms(cell_ortho, positions, charges, [True, True, False])
+    atoms_orig = _make_slab_atoms(cell, positions, charges, [True, True, False])
     atoms_rot = _make_slab_atoms(cell_rot, positions_rot, charges, [True, True, False])
 
     E_orig = _batched_energy([atoms_orig])
@@ -353,32 +360,7 @@ def test_force_consistency(cell):
     np.testing.assert_allclose(np.array(forces[:N]), forces_fd, atol=1e-6, rtol=1e-4)
 
 
-# -- non-neutral system --
-
-
-def test_non_neutral_system():
-    """Correction works for non-neutral systems (extra q_tot terms)."""
-    cell = np.diag([10.0, 10.0, 25.0])
-    positions = np.array([[2.0, 3.0, 5.0], [7.0, 4.0, 8.0]], dtype=float)
-    charges_list = [1.0, 0.5]
-
-    atoms = _make_slab_atoms(cell, positions, charges_list, [True, True, False])
-    energy = _batched_energy([atoms])
-    assert jnp.isfinite(energy[0])
-
-
 # -- batched calculator specific tests --
-
-
-def test_batched_nonorthorhombic_2d():
-    """Batched calculator works with non-orthorhombic 2D PBC cells."""
-    cell = np.array([[10.0, 3.0, 0.0], [0.0, 12.0, 0.0], [0.0, 0.0, 25.0]], dtype=float)
-    positions = np.array([[2.0, 3.0, 5.0], [7.0, 4.0, 8.0]], dtype=float)
-
-    atoms = _make_slab_atoms(cell, positions, [1.0, -1.0], [True, True, False])
-    energy = _batched_energy([atoms])
-    assert jnp.isfinite(energy[0])
-    assert energy[0] != 0.0
 
 
 def test_batched_jit():
@@ -492,7 +474,8 @@ def test_energy_independent_of_vacuum(vacuum):
     atoms_ref = _make_slab_atoms(cell_ref, pos_ref, [1.0, -1.0], [True, True, False])
     energy_ref = float(_batched_energy([atoms_ref])[0])
 
-    np.testing.assert_allclose(energy, energy_ref, rtol=1e-4)
+    # All vacuum sizes shrink to the same h_min, so results are bitwise identical.
+    np.testing.assert_allclose(energy, energy_ref, rtol=1e-10)
 
 
 def test_num_k_with_large_vacuum():

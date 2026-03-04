@@ -182,29 +182,48 @@ def _batched_energy_forces(atoms_list, cutoff=5.0):
 
 # -- tiling consistency (key test) --
 
+_A = 8.0
+_L = 25.0
+_SQUARE_CELL = np.array([[_A, 0, 0], [0, _A, 0], [0, 0, _L]], dtype=float)
+_SQUARE_POS = np.array([[0, 0, 5.0], [_A / 2, _A / 2, 8.0]], dtype=float)
+_HEX_CELL = np.array(
+    [[_A, 0, 0], [_A / 2, _A * math.sqrt(3) / 2, 0], [0, 0, _L]], dtype=float
+)
+_HEX_POS = np.array([[0, 0, 5.0], [_A / 2, _A * math.sqrt(3) / 6, 8.0]], dtype=float)
+
 
 @pytest.mark.parametrize(
-    "tiling_name,P",
+    "cell_prim,positions_prim,tiling_name,P",
     [
-        ("primitive", np.eye(3, dtype=int)),
-        ("sheared", np.array([[1, 1, 0], [0, 1, 0], [0, 0, 1]])),
-        ("2x1", np.array([[2, 0, 0], [0, 1, 0], [0, 0, 1]])),
-        ("rotated_45", np.array([[1, 1, 0], [-1, 1, 0], [0, 0, 1]])),
-        ("2x2", np.array([[2, 0, 0], [0, 2, 0], [0, 0, 1]])),
-        ("sheared_2x1", np.array([[2, 1, 0], [0, 1, 0], [0, 0, 1]])),
+        (_SQUARE_CELL, _SQUARE_POS, "primitive", np.eye(3, dtype=int)),
+        (_SQUARE_CELL, _SQUARE_POS, "sheared", np.array([[1, 1, 0], [0, 1, 0], [0, 0, 1]])),
+        (_SQUARE_CELL, _SQUARE_POS, "2x1", np.array([[2, 0, 0], [0, 1, 0], [0, 0, 1]])),
+        (
+            _SQUARE_CELL,
+            _SQUARE_POS,
+            "rotated_45",
+            np.array([[1, 1, 0], [-1, 1, 0], [0, 0, 1]]),
+        ),
+        (_SQUARE_CELL, _SQUARE_POS, "2x2", np.array([[2, 0, 0], [0, 2, 0], [0, 0, 1]])),
+        (
+            _SQUARE_CELL,
+            _SQUARE_POS,
+            "sheared_2x1",
+            np.array([[2, 1, 0], [0, 1, 0], [0, 0, 1]]),
+        ),
+        (_HEX_CELL, _HEX_POS, "hex_primitive", np.eye(3, dtype=int)),
+        (
+            _HEX_CELL,
+            _HEX_POS,
+            "hex_rectangular",
+            np.array([[1, 0, 0], [1, 2, 0], [0, 0, 1]]),
+        ),
     ],
 )
-def test_tiling_square_lattice(tiling_name, P):
-    """Same square 2D lattice with different unit cells gives same energy/f.u."""
-    a = 8.0
-    L = 25.0
-
-    cell_prim = np.array([[a, 0, 0], [0, a, 0], [0, 0, L]], dtype=float)
-    positions_prim = np.array([[0, 0, 5.0], [a / 2, a / 2, 8.0]], dtype=float)
-    charges_prim = [1.0, -1.0]
-
+def test_tiling_consistency(cell_prim, positions_prim, tiling_name, P):
+    """Same 2D lattice with different unit cells gives same energy/f.u."""
     atoms_prim = _make_slab_atoms(
-        cell_prim, positions_prim, charges_prim, [True, True, False]
+        cell_prim, positions_prim, [1.0, -1.0], [True, True, False]
     )
 
     atoms_sc = make_supercell(atoms_prim, P)
@@ -216,45 +235,6 @@ def test_tiling_square_lattice(tiling_name, P):
     # Tolerance 5e-4: different unit cells get different shrunk cell heights
     # (h_min depends on L_max), leading to different slab correction residuals
     # ~exp(-G_min * gap). The residual is ~1e-4 for α=1.5.
-    np.testing.assert_allclose(
-        float(E_sc[0]) / n_fu,
-        float(E_prim[0]),
-        rtol=5e-4,
-        err_msg=f"Tiling '{tiling_name}' (n_fu={n_fu}) failed",
-    )
-
-
-@pytest.mark.parametrize(
-    "tiling_name,P",
-    [
-        ("primitive_hex", np.eye(3, dtype=int)),
-        ("rectangular", np.array([[1, 0, 0], [1, 2, 0], [0, 0, 1]])),
-    ],
-)
-def test_tiling_hexagonal_lattice(tiling_name, P):
-    """Same hexagonal 2D lattice with different unit cells gives same energy/f.u."""
-    a = 8.0
-    L = 25.0
-
-    cell_prim = np.array(
-        [[a, 0, 0], [a / 2, a * math.sqrt(3) / 2, 0], [0, 0, L]], dtype=float
-    )
-    positions_prim = np.array(
-        [[0, 0, 5.0], [a / 2, a * math.sqrt(3) / 6, 8.0]], dtype=float
-    )
-    charges_prim = [1.0, -1.0]
-
-    atoms_prim = _make_slab_atoms(
-        cell_prim, positions_prim, charges_prim, [True, True, False]
-    )
-
-    atoms_sc = make_supercell(atoms_prim, P)
-    n_fu = abs(int(round(np.linalg.det(P))))
-
-    E_prim = _batched_energy([atoms_prim])
-    E_sc = _batched_energy([atoms_sc])
-
-    # See test_tiling_square_lattice for tolerance rationale.
     np.testing.assert_allclose(
         float(E_sc[0]) / n_fu,
         float(E_prim[0]),

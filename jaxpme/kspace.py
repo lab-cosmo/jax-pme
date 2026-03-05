@@ -1,7 +1,51 @@
+import numpy as np
 import jax
 import jax.numpy as jnp
 
 from functools import partial
+
+# -- preprocessing (numpy only, no JAX device allocation) --
+
+
+def get_kgrid_ewald_shape(cell, lr_wavelength):
+    # note: this seems odd, but is correct -- we have to consider the
+    #       real-space length of the wave vectors
+    ns = np.ceil(np.linalg.norm(cell, axis=-1) / lr_wavelength)
+
+    return (int(ns[0]), int(ns[1]), int(ns[2]))
+
+
+def lr_wavelength_for_num_k(cell, num_k):
+    """Compute lr_wavelength that yields approximately num_k halfspace k-vectors.
+
+    Analytical inversion of get_kgrid_ewald_shape assuming halfspace ≈ N_total/2.
+    The ceil in get_kgrid_ewald_shape means the actual count will be slightly above
+    num_k (conservative in accuracy).
+    """
+    lengths = np.linalg.norm(cell, axis=-1)
+    return float((np.prod(lengths) / (2 * num_k)) ** (1 / 3))
+
+
+def get_kgrid_mesh_shape(cell, mesh_spacing):
+    start = np.array(get_kgrid_ewald_shape(cell, mesh_spacing))
+    actual = 2 * start + 1
+    # todo: revisit need for padding to powers of 2
+    ns = 2 ** np.ceil(np.log2(actual)).astype(int)
+
+    return (int(ns[0]), int(ns[1]), int(ns[2]))
+
+
+def get_kgrid_ewald(cell, lr_wavelength):
+    # in principle, ShapeDtypeStruct would suffice here, but this
+    # does not play well with batching -- it can't be reshaped
+    return np.ones(get_kgrid_ewald_shape(cell, lr_wavelength))
+
+
+def get_kgrid_mesh(cell, mesh_spacing):
+    return np.ones(get_kgrid_mesh_shape(cell, mesh_spacing))
+
+
+# -- JIT-compatible (jax.numpy, runs on device) --
 
 
 def p3m_influence(kvectors, cell, ns, interpolation_nodes):
@@ -20,44 +64,6 @@ def p3m_influence(kvectors, cell, ns, interpolation_nodes):
 def get_reciprocal(cell):
     # note: reciprocal is in rows (like cell)
     return jnp.linalg.inv(cell).T * 2 * jnp.pi
-
-
-def get_kgrid_ewald_shape(cell, lr_wavelength):
-    # note: this seems odd, but is correct -- we have to consider the
-    #       real-space length of the wave vectors
-    ns = jnp.ceil(jnp.linalg.norm(cell, axis=-1) / lr_wavelength)
-
-    return (int(ns[0]), int(ns[1]), int(ns[2]))
-
-
-def lr_wavelength_for_num_k(cell, num_k):
-    """Compute lr_wavelength that yields approximately num_k halfspace k-vectors.
-
-    Analytical inversion of get_kgrid_ewald_shape assuming halfspace ≈ N_total/2.
-    The ceil in get_kgrid_ewald_shape means the actual count will be slightly above
-    num_k (conservative in accuracy).
-    """
-    lengths = jnp.linalg.norm(cell, axis=-1)
-    return float((jnp.prod(lengths) / (2 * num_k)) ** (1 / 3))
-
-
-def get_kgrid_mesh_shape(cell, mesh_spacing):
-    start = jnp.array(get_kgrid_ewald_shape(cell, mesh_spacing))
-    actual = 2 * start + 1
-    # todo: revisit need for padding to powers of 2
-    ns = jnp.array(2) ** (jnp.ceil(jnp.log2(actual)))
-
-    return (int(ns[0]), int(ns[1]), int(ns[2]))
-
-
-def get_kgrid_ewald(cell, lr_wavelength):
-    # in principle, ShapeDtypeStruct would suffice here, but this
-    # does not play well with batching -- it can't be reshaped
-    return jnp.ones(get_kgrid_ewald_shape(cell, lr_wavelength))
-
-
-def get_kgrid_mesh(cell, mesh_spacing):
-    return jnp.ones(get_kgrid_mesh_shape(cell, mesh_spacing))
 
 
 @partial(jax.jit, static_argnums=(1, 2, 3))

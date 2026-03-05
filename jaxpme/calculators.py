@@ -1,3 +1,4 @@
+import numpy as np
 import jax
 import jax.numpy as jnp
 
@@ -93,11 +94,11 @@ def Ewald(
         graph = atoms_to_graph(atoms, cutoff, full_list=full_neighbor_list)
 
         if charges is None:
-            charges = atoms.get_initial_charges()
+            charges = np.asarray(atoms.get_initial_charges())
         else:
-            charges = jnp.array(charges).flatten()
+            charges = np.asarray(charges).flatten()
 
-        k_grid = get_kgrid_ewald(jnp.array(atoms.get_cell().array), lr_wavelength)
+        k_grid = get_kgrid_ewald(np.asarray(atoms.get_cell().array), lr_wavelength)
 
         return charges, *graph, k_grid, smearing
 
@@ -179,11 +180,11 @@ def PME(
         graph = atoms_to_graph(atoms, cutoff)
 
         if charges is None:
-            charges = atoms.get_initial_charges()
+            charges = np.asarray(atoms.get_initial_charges())
         else:
-            charges = jnp.array(charges).flatten()
+            charges = np.asarray(charges).flatten()
 
-        k_grid = get_kgrid_mesh(jnp.array(atoms.get_cell().array), mesh_spacing)
+        k_grid = get_kgrid_mesh(np.asarray(atoms.get_cell().array), mesh_spacing)
 
         return charges, *graph, k_grid, smearing
 
@@ -269,11 +270,11 @@ def P3M(
         graph = atoms_to_graph(atoms, cutoff)
 
         if charges is None:
-            charges = atoms.get_initial_charges()
+            charges = np.asarray(atoms.get_initial_charges())
         else:
-            charges = jnp.array(charges).flatten()
+            charges = np.asarray(charges).flatten()
 
-        k_grid = get_kgrid_mesh(jnp.array(atoms.get_cell().array), mesh_spacing)
+        k_grid = get_kgrid_mesh(np.asarray(atoms.get_cell().array), mesh_spacing)
 
         return charges, *graph, k_grid, smearing
 

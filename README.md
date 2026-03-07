@@ -116,7 +116,7 @@ For computing energies/forces across multiple structures (e.g. for training), ba
 from jaxpme.batched_mixed import Ewald  # or jaxpme.batched_flat
 ```
 
-These accept lists of `ase.Atoms` in `prepare` and handle padding/masking internally. Currently, only batched `Ewald` is implemented.
+These accept lists of `ase.Atoms` in `prepare` and handle padding/masking internally. Currently, only batched `Ewald` is implemented. 2D PBC (slab geometries) is supported for arbitrary triclinic cells; large vacuum gaps are automatically shrunk to keep the k-grid efficient.
 
 ## Development
 

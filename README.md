@@ -122,4 +122,4 @@ These accept lists of `ase.Atoms` in `prepare` and handle padding/masking intern
 
 The package uses `ruff` for linting and formatting and `pytest` for testing. Please run `ruff format . && ruff check --fix .` before *every* commit or set up a commit hook to do it. Tests can be run in the `tests/` folder with `pytest`. Be aware that the test suite can take a few minutes to run.
 
-This project is [maintained](https://github.com/lab-cosmo/.github/blob/main/Maintainers.md) by @E-Rum, and @sirmarcel, who will reply to issues and pull requests opened on this repository as soon as possible. You can mention them directly if you did not receive an answer after a couple of days.
+This project is [maintained](https://github.com/lab-cosmo/.github/blob/main/Maintainers.md) by [@E-Rum](https://github.com/E-Rum), and [@sirmarcel](https://github.com/sirmarcel), who will reply to issues and pull requests opened on this repository as soon as possible. You can mention them directly if you did not receive an answer after a couple of days.

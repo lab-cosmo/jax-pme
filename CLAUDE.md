@@ -29,6 +29,9 @@ tests/
 - **Serial**: `Ewald()`, `PME()`, or `P3M()` → `.prepare()` → `.energy()/.potentials()/.energy_forces()/.energy_forces_stress()`
 - **Batched**: `jaxpme.batched_mixed.Ewald()` → `.prepare([atoms_list], cutoff)` → same methods but batched
 
+### Potential convention (matches torch-pme)
+`V_i = (1/2) Σ_{j≠i} q_j v(r_ij)` — the 1/2 is absorbed into the potential so `energy = Σ_i q_i V_i` (no extra 1/2). Both PBC and non-PBC paths (serial and batched) return this halved potential. If comparing against a textbook `V_i = Σ q_j/r_ij` reference, expect a factor of 2.
+
 ### PME vs P3M
 - **PME**: Lagrange interpolation (4-node). Faster but forces less smooth.
 - **P3M**: B-spline interpolation (n=1-5) with influence function correction. Smoother forces, better for MD.

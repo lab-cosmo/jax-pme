@@ -52,6 +52,16 @@ def test_reference_structures(cutoff):
         np.testing.assert_allclose(F[atom_to_structure == i], F2)
         np.testing.assert_allclose(S[i], S2)
 
+    # non-PBC structure: assert against halved torch-pme-convention reference
+    # V_i = (1/2) sum_{j != i} q_j / r_ij
+    nopbc_idx = len(structures)
+    q_nopbc = atoms_no_pbc.get_initial_charges()
+    r = atoms_no_pbc.get_all_distances()
+    mask = r != 0.0
+    one_over_r = np.where(mask, 1.0 / np.where(mask, r, 1.0), 0.0)
+    ref_nopbc = 0.5 * (one_over_r @ q_nopbc)
+    np.testing.assert_allclose(potentials[atom_to_structure == nopbc_idx], ref_nopbc)
+
 
 @pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])
 def test_mixed(cutoff):
@@ -63,6 +73,9 @@ def test_mixed(cutoff):
     atoms2 = atoms.copy()
     atoms2.set_pbc(False)
 
+    # torch-pme convention: V_i = (1/2) sum_{j != i} q_j / r_ij
+    # the 1/2 is absorbed into the potential so that energy = sum_i q_i V_i
+    # (no extra 1/2 at the energy level). Both PBC and non-PBC paths use this.
     all_distances = atoms2.get_all_distances()
     mask = all_distances != 0.0
     one_over_r = np.where(mask, 1 / np.where(mask, all_distances, 1.0), 0.0)
@@ -79,6 +92,40 @@ def test_mixed(cutoff):
     )
 
     np.testing.assert_allclose(potentials[atom_to_structure == 1], reference_potentials)
+
+
+def test_nopbc_matches_large_box_pbc():
+    """Non-PBC and large-box PBC must agree: both use V_i = (1/2) sum q_j v(r_ij)."""
+    from ase import Atoms
+
+    from jaxpme.batched_mixed.calculators import Ewald
+
+    rng = np.random.default_rng(42)
+    N = 5
+    positions = rng.uniform(-3.0, 3.0, (N, 3))
+    charges = rng.normal(size=N)
+    charges -= charges.mean()
+
+    atoms_pbc = Atoms("H" * N, positions=positions, cell=[200.0] * 3, pbc=True)
+    atoms_pbc.set_initial_charges(charges)
+    atoms_nopbc = Atoms("H" * N, positions=positions, pbc=False)
+    atoms_nopbc.set_initial_charges(charges)
+
+    calc = Ewald(prefactor=1.0)
+
+    c, b, nb, pb = calc.prepare([atoms_pbc], cutoff=10.0)
+    pot_pbc = np.asarray(calc.potentials(c, b, nb, pb))[:N]
+
+    c, b, nb, pb = calc.prepare([atoms_nopbc], cutoff=10.0)
+    pot_nopbc = np.asarray(calc.potentials(c, b, nb, pb))[:N]
+
+    r = np.linalg.norm(positions[None, :] - positions[:, None], axis=-1)
+    diag = np.eye(N, dtype=bool)
+    inv_r = np.where(diag, 0.0, 1.0 / np.where(diag, 1.0, r))
+    ref_halved = 0.5 * (inv_r @ charges)
+
+    np.testing.assert_allclose(pot_nopbc, ref_halved, atol=1e-6)
+    np.testing.assert_allclose(pot_pbc, pot_nopbc, atol=1e-4)
 
 
 @pytest.mark.parametrize("cutoff", [4.0, 5.0, 6.0])

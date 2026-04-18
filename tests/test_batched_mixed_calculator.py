@@ -95,7 +95,7 @@ def test_mixed(cutoff):
 
 
 def test_nopbc_matches_large_box_pbc():
-    """Non-PBC and large-box PBC must agree: both use V_i = (1/2) sum q_j v(r_ij)."""
+    """Non-PBC and large-box PBC agree: both follow V_i = (1/2) sum q_j v(r_ij)."""
     from ase import Atoms
 
     from jaxpme.batched_mixed.calculators import Ewald
@@ -106,17 +106,21 @@ def test_nopbc_matches_large_box_pbc():
     charges = rng.normal(size=N)
     charges -= charges.mean()
 
-    atoms_pbc = Atoms("H" * N, positions=positions, cell=[200.0] * 3, pbc=True)
+    # big box so PBC -> non-PBC limit is tight; cutoff controls default
+    # lr_wavelength (= cutoff/8), keeping the k-grid reasonably small
+    box, cutoff = 100.0, 15.0
+
+    atoms_pbc = Atoms("H" * N, positions=positions, cell=[box] * 3, pbc=True)
     atoms_pbc.set_initial_charges(charges)
     atoms_nopbc = Atoms("H" * N, positions=positions, pbc=False)
     atoms_nopbc.set_initial_charges(charges)
 
     calc = Ewald(prefactor=1.0)
 
-    c, b, nb, pb = calc.prepare([atoms_pbc], cutoff=10.0)
+    c, b, nb, pb = calc.prepare([atoms_pbc], cutoff=cutoff)
     pot_pbc = np.asarray(calc.potentials(c, b, nb, pb))[:N]
 
-    c, b, nb, pb = calc.prepare([atoms_nopbc], cutoff=10.0)
+    c, b, nb, pb = calc.prepare([atoms_nopbc], cutoff=cutoff)
     pot_nopbc = np.asarray(calc.potentials(c, b, nb, pb))[:N]
 
     r = np.linalg.norm(positions[None, :] - positions[:, None], axis=-1)
@@ -124,7 +128,7 @@ def test_nopbc_matches_large_box_pbc():
     inv_r = np.where(diag, 0.0, 1.0 / np.where(diag, 1.0, r))
     ref_halved = 0.5 * (inv_r @ charges)
 
-    np.testing.assert_allclose(pot_nopbc, ref_halved, atol=1e-6)
+    np.testing.assert_allclose(pot_nopbc, ref_halved)
     np.testing.assert_allclose(pot_pbc, pot_nopbc, atol=1e-4)
 
 

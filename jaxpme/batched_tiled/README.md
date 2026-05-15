@@ -84,7 +84,7 @@ This is the heterogeneous-batch win vs `batched_mixed`'s max-padding (which woul
 
 ### Dispatch tables
 
-For each system's `(n_atom_tiles_b × n_kvec_tiles)` on-diagonal block, the host-side batcher enumerates one triple per `(BM × BK)` sub-tile. Two tables — same triples, reordered for the segment_sum group layout of each pass:
+For each system's `(n_atom_tiles_b × n_kvec_tiles)` on-diagonal block, `get_batch` enumerates one triple per `(BM × BK)` sub-tile (vectorised numpy, not in the JIT trace). The resulting arrays are plain `jnp` arrays at the kernel call site — they're prefetched to device alongside positions, cell, and the rest of the batch. Two tables — same triples, reordered for the segment_sum group layout of each pass:
 
 ```
 pass1_flat: [T, 3] — (b, k-tile, atom-tile)   — segments by (b, k-tile)
@@ -98,7 +98,7 @@ The kernel `jax.vmap`s `per_triple(...)` over each table; each call computes a `
 
 ### JIT cache stability
 
-Both tables have **shape `[T, 3]`** that depends only on the bucket-rounded `N_pbc_total` and `K_pad` (via `next_size`) — not on per-system N_b. Contents vary at runtime; JIT never looks at them. Same-bucket batches reuse the JIT cache regardless of how atoms are distributed across systems. Compile only happens when a batch bumps to a new bucket.
+Both tables have **shape `[T, 3]`** that depends only on the bucket-rounded `N_pbc_total` and `K_pad` (via `next_size`) — not on per-system N_b. Contents are runtime data; JIT keys on shape, not values. Same-bucket batches reuse the JIT cache regardless of how atoms are distributed across systems. Compile only happens when a batch bumps to a new bucket. (The "built on host" point above is about not constructing them inside the JIT trace — at runtime they live on device like the other inputs.)
 
 ## Contracts
 

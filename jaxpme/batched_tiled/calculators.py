@@ -76,7 +76,11 @@ def Ewald(
         G = jax.vmap(pot.lr)(smearing_pbc, k2)
         W = G * g_factor / volume_pbc[:, None]
 
-        n_kvec_tiles = batch_pbc.k_grid.shape[1] // int(batch_pbc.BK)
+        # BM/BK survive the prefetch / device_put pipeline as dummy-array
+        # shape metadata (see `batched_tiled.batching.get_batch`). Reading
+        # `.shape[0]` recovers the static Python int needed by the tiled
+        # kernel's `lax.dynamic_slice` size arguments.
+        n_kvec_tiles = batch_pbc.k_grid.shape[1] // batch_pbc.BK.shape[0]
         atom_off = jnp.asarray(batch_pbc.pbc_atom_off)
         pass1_flat = jnp.asarray(batch_pbc.pass1_flat)
         pass2_flat = jnp.asarray(batch_pbc.pass2_flat)
@@ -91,8 +95,8 @@ def Ewald(
             atom_off,
             pass1_flat,
             pass2_flat,
-            int(batch_pbc.BM),
-            int(batch_pbc.BK),
+            batch_pbc.BM.shape[0],
+            batch_pbc.BK.shape[0],
             n_kvec_tiles,
         )
 

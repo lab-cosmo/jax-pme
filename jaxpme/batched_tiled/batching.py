@@ -309,8 +309,15 @@ def get_batch(
         pbc_atom_mask=pbc_atom_mask_flat,
         pass1_flat=pass1_flat,
         pass2_flat=pass2_flat,
-        BM=BM,
-        BK=BK,
+        # BM/BK are encoded as the shape of a 1-D dummy array so the values
+        # survive `jax.device_put` / pytree machinery as static shape
+        # metadata (Python ints stored in a namedtuple field would be
+        # promoted to 0-D jax arrays by `device_put`, and the tiled kernel
+        # needs them as static `lax.dynamic_slice` size arguments). The
+        # values are never read — only `.shape[0]` matters — so `bool` is
+        # the smallest and least-surprising dtype choice.
+        BM=np.zeros(BM, dtype=bool),
+        BK=np.zeros(BK, dtype=bool),
     )
     nonperiodic_batch = NonPeriodic(
         centers=nonpbc_centers,

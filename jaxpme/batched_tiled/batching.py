@@ -161,11 +161,8 @@ def get_batch(
     # kernel sees a clean tile grid. Padding rows have k=0 -> W=0, contribute
     # nothing (halfspace excludes k=0; for full-space coulomb.lr_k2(s, 0) is
     # zeroed via the coulomb() wrapper in potentials.py).
-    if _max_k > 0:
-        k_size = next_size(_max_k, strategy=num_k_strat)
-        K_pad = int(np.ceil(k_size / BK) * BK)
-    else:
-        K_pad = BK  # one tile, even if no periodic systems
+    k_size = next_size(_max_k, strategy=num_k_strat)
+    K_pad = int(np.ceil(k_size / BK) * BK)
 
     B_pbc_padded = max(1, next_size(_total_pbc, strategy=num_structures_pbc))
 

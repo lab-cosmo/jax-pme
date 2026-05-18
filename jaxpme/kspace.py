@@ -61,6 +61,38 @@ def p3m_influence(kvectors, cell, ns, interpolation_nodes):
     return 1.0 / u_squared
 
 
+def slab_geometry(cell, pbc):
+    """Non-periodic axis projection for 2D-slab geometries.
+
+    Given one system's cell and pbc mask (one axis non-periodic), returns
+    (n_hat [3], basis_len []) — unit vector along the non-periodic axis
+    and the cell extent projected onto it. vmap-friendly.
+    """
+    nonpbc = ~pbc
+    k = jnp.argmax(nonpbc.astype(jnp.int32))
+    v1 = cell[(k + 1) % 3]
+    v2 = cell[(k + 2) % 3]
+    n = jnp.cross(v1, v2)
+    n_hat = n / jnp.linalg.norm(n)
+    basis_len = jnp.abs(jnp.dot(cell[k], n_hat))
+    return n_hat, basis_len
+
+
+def slab_energy_per_atom(z_i, M_axis, M_axis_sq, charge_tot, basis_len):
+    """Yeh-Berkowitz 2D slab energy contribution per atom (unnormalised by V).
+
+    All scalar inputs (M_axis, M_axis_sq, charge_tot, basis_len) are per-system
+    dipole moments and geometry; z_i is per-atom projected coordinate. Returns
+    per-atom contribution that still needs `/ volume` and the 2D-PBC gating
+    applied by the caller.
+    """
+    return (4.0 * jnp.pi) * (
+        z_i * M_axis
+        - 0.5 * (M_axis_sq + charge_tot * z_i**2)
+        - (charge_tot / 12.0) * basis_len**2
+    )
+
+
 def get_reciprocal(cell):
     # note: reciprocal is in rows (like cell)
     return jnp.linalg.inv(cell).T * 2 * jnp.pi

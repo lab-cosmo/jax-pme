@@ -48,6 +48,7 @@ def _energy_of(atoms, BM=32, BK=128):
 # [K6] BM=1, BK=1 (degenerate tiling) matches default tile sizes
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("n_atoms", [3, 5, 8])
 def test_bm1_bk1_matches_default(n_atoms):
     """BM=BK=1 (every tile is one atom × one k-vec) must give the same energy."""
@@ -63,6 +64,7 @@ def test_bm1_bk1_matches_default(n_atoms):
 # ---------------------------------------------------------------------------
 # [K6] BM larger than all atom counts → exactly one atom-tile per system
 # ---------------------------------------------------------------------------
+
 
 def test_large_bm_one_tile_per_system():
     """When BM > max(N_b), every system uses a single atom-tile; dispatch table is minimal."""
@@ -88,6 +90,7 @@ def test_large_bm_one_tile_per_system():
 # [K2] n_kvec_tiles=1: K_pad == BK (single k-tile per system)
 # ---------------------------------------------------------------------------
 
+
 def test_single_kvec_tile():
     """When BK covers all k-vecs in one tile, group_p1 = b; must still be correct."""
     from jaxpme.batched_tiled.calculators import Ewald
@@ -96,8 +99,12 @@ def test_single_kvec_tile():
     BK = 256
 
     calc_ref = Ewald(prefactor=1.0)
-    c_ref, b_ref, bnp_ref, bp_ref = calc_ref.prepare([a], num_k=_NUM_K, cutoff=_CUTOFF, BK=32)
-    e_ref = float(np.array(calc_ref.energy(c_ref, b_ref, bnp_ref, bp_ref))[b_ref.structure_mask][0])
+    c_ref, b_ref, bnp_ref, bp_ref = calc_ref.prepare(
+        [a], num_k=_NUM_K, cutoff=_CUTOFF, BK=32
+    )
+    e_ref = float(
+        np.array(calc_ref.energy(c_ref, b_ref, bnp_ref, bp_ref))[b_ref.structure_mask][0]
+    )
 
     calc = Ewald(prefactor=1.0)
     c, b, bnp, bp = calc.prepare([a], num_k=_NUM_K, cutoff=_CUTOFF, BK=BK)
@@ -107,13 +114,17 @@ def test_single_kvec_tile():
     )
     e = float(np.array(calc.energy(c, b, bnp, bp))[b.structure_mask][0])
     np.testing.assert_allclose(
-        e, e_ref, rtol=1e-10, err_msg="Single-k-tile (n_kvec_tiles=1) gives different energy"
+        e,
+        e_ref,
+        rtol=1e-10,
+        err_msg="Single-k-tile (n_kvec_tiles=1) gives different energy",
     )
 
 
 # ---------------------------------------------------------------------------
 # [B1] Dispatch table coverage: exhaustive, disjoint (b, atom-tile, k-tile) triples
 # ---------------------------------------------------------------------------
+
 
 def test_dispatch_table_exhaustive_coverage():
     """pass2_flat must contain every (b, atom-tile, k-tile) triple exactly once."""

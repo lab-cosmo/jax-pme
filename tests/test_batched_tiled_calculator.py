@@ -300,6 +300,7 @@ def test_matches_batched_mixed():
 # Helpers shared by cross-system isolation / physics invariant tests
 # ---------------------------------------------------------------------------
 
+
 def _make_random_pbc(n, seed=0, box=6.0):
     from ase import Atoms as _Atoms
 
@@ -320,7 +321,9 @@ def _energy_of(atoms, BM=32, BK=128):
     from jaxpme.batched_tiled.calculators import Ewald
 
     calc = Ewald(prefactor=1.0)
-    c, b, bnp, bp = calc.prepare([atoms], num_k=_NUM_K_ADV, cutoff=_CUTOFF_ADV, BM=BM, BK=BK)
+    c, b, bnp, bp = calc.prepare(
+        [atoms], num_k=_NUM_K_ADV, cutoff=_CUTOFF_ADV, BM=BM, BK=BK
+    )
     return float(np.array(calc.energy(c, b, bnp, bp))[b.structure_mask][0])
 
 
@@ -328,13 +331,16 @@ def _energy_in_batch(atoms_list, idx, BM=32, BK=128):
     from jaxpme.batched_tiled.calculators import Ewald
 
     calc = Ewald(prefactor=1.0)
-    c, b, bnp, bp = calc.prepare(atoms_list, num_k=_NUM_K_ADV, cutoff=_CUTOFF_ADV, BM=BM, BK=BK)
+    c, b, bnp, bp = calc.prepare(
+        atoms_list, num_k=_NUM_K_ADV, cutoff=_CUTOFF_ADV, BM=BM, BK=BK
+    )
     return float(np.array(calc.energy(c, b, bnp, bp))[b.structure_mask][idx])
 
 
 # ---------------------------------------------------------------------------
 # [K4] Batch order independence
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("sizes", [(3, 9), (5, 5), (1, 12)])
 def test_batch_order_independence(sizes):
@@ -356,6 +362,7 @@ def test_batch_order_independence(sizes):
 # [K4] Identical co-batched systems produce bitwise-equal energies
 # ---------------------------------------------------------------------------
 
+
 def test_identical_systems_equal_energies():
     """Two copies of the same system in one batch must have identical energies."""
     from jaxpme.batched_tiled.calculators import Ewald
@@ -374,6 +381,7 @@ def test_identical_systems_equal_energies():
 # ---------------------------------------------------------------------------
 # [K5] Unwrapped positions give the same energy as wrapped ones
 # ---------------------------------------------------------------------------
+
 
 def test_unwrapped_positions_invariant():
     """Shifting all positions by one full cell vector must not change the energy."""
@@ -399,6 +407,7 @@ def test_unwrapped_positions_invariant():
 # ---------------------------------------------------------------------------
 # Charge sign symmetry: E(q) == E(-q)
 # ---------------------------------------------------------------------------
+
 
 def test_charge_sign_symmetry():
     """Ewald energy is quadratic in charges, so E(q) == E(-q)."""

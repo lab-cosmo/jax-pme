@@ -67,7 +67,7 @@ def test_bm1_bk1_matches_default(n_atoms):
 
 
 def test_large_bm_one_tile_per_system():
-    """When BM > max(N_b), every system uses a single atom-tile; dispatch table is minimal."""
+    """When BM > max(N_b), every system uses a single atom-tile; dispatch table minimal."""
     from jaxpme.batched_tiled.calculators import Ewald
 
     systems = [_make_random_pbc(n, seed=i) for i, n in enumerate([3, 5, 7])]

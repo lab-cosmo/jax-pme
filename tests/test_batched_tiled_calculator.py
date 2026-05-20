@@ -294,3 +294,123 @@ def test_matches_batched_mixed():
         rtol=1e-9,
         atol=1e-15,
     )
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by cross-system isolation / physics invariant tests
+# ---------------------------------------------------------------------------
+
+def _make_random_pbc(n, seed=0, box=6.0):
+    from ase import Atoms as _Atoms
+
+    rng = np.random.default_rng(seed)
+    pos = rng.uniform(0, box, (n, 3))
+    q = rng.choice([-1.0, 1.0], size=n).astype(np.float64)
+    q[-1] = -q[:-1].sum()
+    atoms = _Atoms(numbers=[1] * n, positions=pos, cell=np.diag([box, box, box]), pbc=True)
+    atoms.set_initial_charges(q)
+    return atoms
+
+
+_CUTOFF_ADV = 4.0
+_NUM_K_ADV = 100
+
+
+def _energy_of(atoms, BM=32, BK=128):
+    from jaxpme.batched_tiled.calculators import Ewald
+
+    calc = Ewald(prefactor=1.0)
+    c, b, bnp, bp = calc.prepare([atoms], num_k=_NUM_K_ADV, cutoff=_CUTOFF_ADV, BM=BM, BK=BK)
+    return float(np.array(calc.energy(c, b, bnp, bp))[b.structure_mask][0])
+
+
+def _energy_in_batch(atoms_list, idx, BM=32, BK=128):
+    from jaxpme.batched_tiled.calculators import Ewald
+
+    calc = Ewald(prefactor=1.0)
+    c, b, bnp, bp = calc.prepare(atoms_list, num_k=_NUM_K_ADV, cutoff=_CUTOFF_ADV, BM=BM, BK=BK)
+    return float(np.array(calc.energy(c, b, bnp, bp))[b.structure_mask][idx])
+
+
+# ---------------------------------------------------------------------------
+# [K4] Batch order independence
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("sizes", [(3, 9), (5, 5), (1, 12)])
+def test_batch_order_independence(sizes):
+    """Energy of system A must be identical in [A, B] and [B, A] orderings."""
+    a = _make_random_pbc(sizes[0], seed=0)
+    b_sys = _make_random_pbc(sizes[1], seed=1)
+
+    e_a_ab = _energy_in_batch([a, b_sys], 0)
+    e_a_ba = _energy_in_batch([b_sys, a], 1)
+
+    np.testing.assert_equal(
+        e_a_ab,
+        e_a_ba,
+        err_msg=f"Energy of A differs between [A,B] and [B,A] for sizes={sizes}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# [K4] Identical co-batched systems produce bitwise-equal energies
+# ---------------------------------------------------------------------------
+
+def test_identical_systems_equal_energies():
+    """Two copies of the same system in one batch must have identical energies."""
+    from jaxpme.batched_tiled.calculators import Ewald
+
+    a = _make_random_pbc(7, seed=42)
+    calc = Ewald(prefactor=1.0)
+    c, b, bnp, bp = calc.prepare([a, a], num_k=_NUM_K_ADV, cutoff=_CUTOFF_ADV)
+    e = np.array(calc.energy(c, b, bnp, bp))[b.structure_mask]
+    np.testing.assert_equal(
+        e[0],
+        e[1],
+        err_msg="Two identical systems in the same batch produce different energies",
+    )
+
+
+# ---------------------------------------------------------------------------
+# [K5] Unwrapped positions give the same energy as wrapped ones
+# ---------------------------------------------------------------------------
+
+def test_unwrapped_positions_invariant():
+    """Shifting all positions by one full cell vector must not change the energy."""
+    a = _make_random_pbc(6, seed=99)
+    box = a.get_cell().array[0, 0]
+
+    wrapped = a.copy()
+    wrapped.set_positions(a.get_positions() % box)
+
+    shifted = a.copy()
+    pos = a.get_positions().copy()
+    pos[:, 0] += box
+    shifted.set_positions(pos)
+
+    np.testing.assert_allclose(
+        _energy_of(wrapped),
+        _energy_of(shifted),
+        rtol=1e-10,
+        err_msg="Energy changes when positions shift by one full cell vector",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Charge sign symmetry: E(q) == E(-q)
+# ---------------------------------------------------------------------------
+
+def test_charge_sign_symmetry():
+    """Ewald energy is quadratic in charges, so E(q) == E(-q)."""
+    a = _make_random_pbc(6, seed=55)
+    q = a.get_initial_charges()
+
+    a_neg = a.copy()
+    a_neg.set_initial_charges(-q)
+
+    np.testing.assert_allclose(
+        _energy_of(a),
+        _energy_of(a_neg),
+        rtol=1e-10,
+        err_msg="E(q) != E(-q): linear charge term present",
+    )

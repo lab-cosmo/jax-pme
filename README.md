@@ -113,10 +113,18 @@ It is *highly* recommended to tune convergence parameters for your specific syst
 For computing energies/forces across multiple structures (e.g. for training), batched implementations are available:
 
 ```python
-from jaxpme.batched_mixed import Ewald  # or jaxpme.batched_flat
+from jaxpme.batched_mixed import Ewald   # rectangular max-padding, supports cutoff-only API
+from jaxpme.batched_tiled import Ewald   # per-system sum-padding + tile dispatch (see below)
+from jaxpme.batched_flat import Ewald    # alternative flat padding strategy
 ```
 
-These accept lists of `ase.Atoms` in `prepare` and handle padding/masking internally. Currently, only batched `Ewald` is implemented. 2D PBC (slab geometries) is supported for arbitrary triclinic cells; large vacuum gaps are automatically shrunk to keep the k-grid efficient.
+All three accept lists of `ase.Atoms` in `prepare` and handle padding/masking internally. Currently, only batched `Ewald` is implemented. 2D PBC (slab geometries) is supported for arbitrary triclinic cells; large vacuum gaps are automatically shrunk to keep the k-grid efficient.
+
+`batched_tiled` is a second Ewald backend designed for heterogeneous batches: atoms are **sum-padded per system** (each system padded to `⌈N_b/BM⌉·BM` atoms, concatenated into one flat array) rather than max-padded to the batch's largest system. The reciprocal sum runs through a pure-JAX tile-dispatched kernel over fixed-size `(BM × BK)` work tiles — `vmap + segment_sum` for pass 1's structure factors, `vmap + reshape-sum` for pass 2's per-atom potential. Differentiates cleanly through autograd, including stress, with no `custom_vjp`. Trade-offs vs `batched_mixed`:
+
+- **`num_k` is required** on `prepare` (sets per-cell K target via `lr_wavelength_for_num_k`). The K axis stays rectangular across the batch, so all systems share `K_pad`; pick `num_k` once and tune Ewald α to shift work between real and reciprocal space.
+- **Tile sizes `(BM, BK)` are fixed at prepare time** (defaults `BM=32, BK=128`). They drive both the per-system atom padding and the kernel tile dimensions.
+- Lower memory and faster on heterogeneous batches where system sizes vary by a lot (small molecules + larger crystals/MOFs in the same batch).
 
 ## Development
 

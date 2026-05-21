@@ -14,9 +14,13 @@ jaxpme/
 ├── utils.py            # Neighbor lists, cell handling (no mixed PBC)
 ├── prefactors.py       # Unit conversion constants (eV_A, etc.)
 ├── batched_flat/       # Batched Ewald (flat padding strategy)
-└── batched_mixed/      # Batched Ewald (mixed real/reciprocal batching)
-    ├── calculators.py  # batched_mixed.Ewald() — main batched API
-    └── batching.py     # Batch preparation utilities
+├── batched_mixed/      # Batched Ewald (mixed real/reciprocal batching)
+│   ├── calculators.py  # batched_mixed.Ewald() — main batched API
+│   └── batching.py     # Batch preparation utilities
+└── batched_tiled/      # Batched Ewald with sum-padded atoms + (BM, BK) tile dispatch
+    ├── calculators.py  # batched_tiled.Ewald() — heterogeneous-batch backend
+    ├── batching.py     # Sum-padded layout + single (b, m_tile, k_tile) dispatch table
+    └── kernel.py       # phi_recip_xla_vmap: vmap + (segment_sum | reshape-sum) reciprocal kernel
 
 tests/
 ├── conftest.py         # REFERENCE_STRUCTURES_DIR constant
@@ -28,6 +32,7 @@ tests/
 ## Key APIs
 - **Serial**: `Ewald()`, `PME()`, or `P3M()` → `.prepare()` → `.energy()/.potentials()/.energy_forces()/.energy_forces_stress()`
 - **Batched**: `jaxpme.batched_mixed.Ewald()` → `.prepare([atoms_list], cutoff)` → same methods but batched
+- **Tiled batched**: `jaxpme.batched_tiled.Ewald()` → `.prepare([atoms_list], num_k, cutoff)` — sum-pads atoms per system (heterogeneous-batch friendly), routes reciprocal sum through tile-dispatched XLA kernel. `num_k` is REQUIRED (no cutoff-only path).
 
 ### PME vs P3M
 - **PME**: Lagrange interpolation (4-node). Faster but forces less smooth.
@@ -39,8 +44,11 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
 ## Current Limitations
 - PME only supports 4-node Lagrange interpolation
 - Mixed PBC (2D) only works in batched implementations, not serial
+- Serial Ewald returns NaN for non-PBC structures (only batched calculators
+  handle non-PBC via bare 1/r) — see open issue for fallback
 - Power-law potentials raise `NotImplementedError` for mixed PBC corrections
 - `calculators.py` has TODO for PME/P3M parameter tuning logic
+- `batched_tiled.prepare` requires `num_k` (no cutoff-only auto-derivation path)
 
 ## 2D PBC (slab correction)
 - Supports arbitrary triclinic cells (not just orthorhombic)

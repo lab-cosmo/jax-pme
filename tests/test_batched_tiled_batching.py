@@ -10,8 +10,8 @@ Assumptions under test:
 
   [K6] BM=1, BK=1 (degenerate tiling) gives the same energy as defaults.
 
-  [B1] _build_dispatch_tables produces exhaustive, disjoint coverage.
-       Every (b, atom-tile, k-tile) triple appears exactly once in pass2_flat.
+  [B1] _build_dispatch_table produces exhaustive, disjoint coverage.
+       Every (b, m_tile, k_tile) triple appears exactly once in dispatch_table.
 """
 
 import numpy as np
@@ -127,7 +127,7 @@ def test_single_kvec_tile():
 
 
 def test_dispatch_table_exhaustive_coverage():
-    """pass2_flat must contain every (b, atom-tile, k-tile) triple exactly once."""
+    """dispatch_table must contain every (b, m_tile, k_tile) triple exactly once."""
     from jaxpme.batched_tiled.calculators import Ewald
 
     systems = [_make_random_pbc(n, seed=i) for i, n in enumerate([3, 7, 5, 2])]
@@ -151,11 +151,11 @@ def test_dispatch_table_exhaustive_coverage():
             for kt in range(n_kvec_tiles):
                 expected.add((b_idx, mt, kt))
 
-    pass2 = np.array(bp.pass2_flat)
-    actual = set(map(tuple, pass2.tolist()))
+    table = np.array(bp.dispatch_table)
+    actual = set(map(tuple, table.tolist()))
 
     assert actual == expected, (
-        f"pass2_flat coverage mismatch.\n"
+        f"dispatch_table coverage mismatch.\n"
         f"  Missing: {expected - actual}\n"
         f"  Extra:   {actual - expected}"
     )

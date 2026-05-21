@@ -1,6 +1,6 @@
 # Batched Ewald: Tiled Approach
 
-A batched Ewald backend designed for **heterogeneous** atom counts across the batch. Atoms are sum-padded per system (each system padded individually to a multiple of `BM`), and the reciprocal sum runs through a pure-JAX tile-dispatched kernel (`vmap + segment_sum`). Stress works through autograd — no `custom_vjp`, no `stop_gradient` on `kvec/W`.
+A batched Ewald backend designed for **heterogeneous** atom counts across the batch. Atoms are sum-padded per system (each system padded individually to a multiple of `BM`), and the reciprocal sum runs through a pure-JAX tile-dispatched kernel (`vmap + segment_sum` in pass 1, `vmap + reshape-sum` in pass 2). Stress works through autograd — no `custom_vjp`, no `stop_gradient` on `kvec/W`.
 
 ## Usage
 
@@ -49,7 +49,7 @@ In a batch of three systems with `(N_0, K_0), (N_1, K_1), (N_2, K_2)` shapes, th
               └─────────┴─────────┴─────────┘
 ```
 
-`batched_tiled` only computes the on-diagonal blocks. The dispatch tables enumerate which `(BM × BK)` sub-tiles cover each diagonal block.
+`batched_tiled` only computes the on-diagonal blocks. The dispatch table enumerates which `(BM × BK)` sub-tiles cover each diagonal block.
 
 ### Two padding axes, two different strategies
 
@@ -82,23 +82,25 @@ This is the heterogeneous-batch win vs `batched_mixed`'s max-padding (which woul
    sys 2:  kkkkkkkkkk------
 ```
 
-### Dispatch tables
+### Dispatch table
 
-For each system's `(n_atom_tiles_b × n_kvec_tiles)` on-diagonal block, `get_batch` enumerates one triple per `(BM × BK)` sub-tile (vectorised numpy, not in the JIT trace). The resulting arrays are plain `jnp` arrays at the kernel call site — they're prefetched to device alongside positions, cell, and the rest of the batch. Two tables — same triples, reordered for the segment_sum group layout of each pass:
+For each system's `(n_atom_tiles_b × n_kvec_tiles)` on-diagonal block, `get_batch` enumerates one triple per `(BM × BK)` sub-tile (vectorised numpy, not in the JIT trace). The resulting array is a plain `jnp` array at the kernel call site — prefetched to device alongside positions, cell, and the rest of the batch. One table, in pass-2 order (outer `m_tile`, inner `k_tile`):
 
 ```
-pass1_flat: [T, 3] — (b, k-tile, atom-tile)   — segments by (b, k-tile)
-pass2_flat: [T, 3] — (b, atom-tile, k-tile)   — segments by (b, atom-tile)
+dispatch_table: [T, 3] — (b, m_tile, k_tile)
 
   T = (K_pad / BK) · (N_pbc_total / BM)
     = sum over systems of (n_atom_tiles_b · n_kvec_tiles)
 ```
 
-The kernel `jax.vmap`s `per_triple(...)` over each table; each call computes a `[BM, BK]` trig block (`cos(r @ k.T)` and `sin(r @ k.T)`) and reduces it. `jax.ops.segment_sum` glues the partials into the global `S^r/S^i` (pass 1) and `φ` (pass 2) arrays.
+The kernel `jax.vmap`s `per_triple(...)` over the table; each call computes a `[BM, BK]` trig block (`cos(r @ k.T)` and `sin(r @ k.T)`) and reduces it. Two different reductions glue the partials into global arrays:
+
+- **Pass 1** uses `jax.ops.segment_sum` on segment ids `b · n_kvec_tiles + kt` to build `S^r`, `S^i [B, K_pad]`. Ids are unsorted under pass-2 ordering, but `segment_sum` is order-agnostic.
+- **Pass 2** exploits the outer-m_tile ordering: each `(b, m_tile)` segment is exactly `n_kvec_tiles` consecutive rows, so `phi_per.reshape(M_TILES, n_kvec_tiles, BM).sum(axis=1)` does the reduction without any `segment_sum` at all — better XLA fusion.
 
 ### JIT cache stability
 
-Both tables have **shape `[T, 3]`** that depends only on the bucket-rounded `N_pbc_total` and `K_pad` (via `next_size`) — not on per-system N_b. Contents are runtime data; JIT keys on shape, not values. Same-bucket batches reuse the JIT cache regardless of how atoms are distributed across systems. Compile only happens when a batch bumps to a new bucket. (The "built on host" point above is about not constructing them inside the JIT trace — at runtime they live on device like the other inputs.)
+The dispatch table has **shape `[T, 3]`** that depends only on the bucket-rounded `N_pbc_total` and `K_pad` (via `next_size`) — not on per-system N_b. Contents are runtime data; JIT keys on shape, not values. Same-bucket batches reuse the JIT cache regardless of how atoms are distributed across systems. Compile only happens when a batch bumps to a new bucket. (The "built on host" point above is about not constructing it inside the JIT trace — at runtime it lives on device like the other inputs.)
 
 ## Contracts
 

@@ -6,9 +6,13 @@ rounded up to a multiple of BM). K-vectors are rectangular `[B_pbc, K_pad, 3]`
 with the same K_pad for every system — `num_k` is required in `prepare`, which
 sets the per-cell K target via `lr_wavelength_for_num_k`.
 
-The dispatch tables `pass1_flat[T, 3]` and `pass2_flat[T, 3]` enumerate the
-on-diagonal `(BM × BK)` blocks of the block-diagonal atom×kvec work matrix —
-one triple `(b, k-tile, atom-tile)` per block. See `_build_dispatch_tables`.
+The dispatch table `dispatch_table[T, 3]` enumerates the on-diagonal
+`(BM × BK)` blocks of the block-diagonal atom×kvec work matrix — one triple
+`(b, m_tile, k_tile)` per block, sorted in pass-2 order (outer m_tile, inner
+k_tile) so consecutive `n_kvec_tiles` rows form one `(b, m_tile)` group. This
+lets pass 2 collapse to `reshape + sum(axis=1)` instead of `segment_sum`; pass
+1 uses `segment_sum` on segment ids `b·n_kvec_tiles + kt` (unsorted, but
+`segment_sum` is order-agnostic for correctness). See `_build_dispatch_table`.
 
 `Batch` and `NonPeriodic` are re-imported from `batched_mixed.batching`; only
 the `Periodic` layout differs.
@@ -41,9 +45,8 @@ Periodic = namedtuple(
         "pbc_segment_atom",  # [N_pbc_total] system id per flat slot
         "pbc_to_flat",  # [N_pbc_total] sr atom index
         "pbc_atom_mask",  # [N_pbc_total] real vs padding atom
-        # dispatch tables (b, k-tile, atom-tile) / (b, atom-tile, k-tile)
-        "pass1_flat",  # [T, 3]
-        "pass2_flat",  # [T, 3]
+        # dispatch table (b, m_tile, k_tile), pass-2 ordered
+        "dispatch_table",  # [T, 3]
         # tile sizes baked in at batch construction
         "BM",
         "BK",
@@ -54,17 +57,16 @@ Periodic = namedtuple(
 __all__ = ["Batch", "NonPeriodic", "Periodic", "get_batch", "prepare"]
 
 
-def _build_dispatch_tables(pbc_atom_off, n_kvec_tiles, BM):
+def _build_dispatch_table(pbc_atom_off, n_kvec_tiles, BM):
     """Enumerate the on-diagonal (BM × BK) blocks of the block-diagonal
-    atom×kvec work matrix. Returns `(pass1_flat, pass2_flat)`, each `[T, 3]`
-    int32 with rows `(b, k-tile, atom-tile)` and `(b, atom-tile, k-tile)`.
+    atom×kvec work matrix. Returns `dispatch_table [T, 3]` int32 with rows
+    `(b, m_tile, k_tile)` in pass-2 order — outer `m_tile`, inner `k_tile`
+    — so consecutive `n_kvec_tiles` rows share the same `(b, m_tile)` group.
 
-    Same set of triples in both tables, reordered for the segment_sum group
-    layout of each pass:
-      pass 1 segments by `(b, kt)` so contributions from different atom-tiles
-        within the same (system, k-tile) group reduce to S^r/S^i;
-      pass 2 segments by `(b, mt)` so contributions from different k-tiles
-        within the same (system, atom-tile) group reduce to φ.
+    Pass 2 uses this directly: reshape `[T, BM] -> [M_TILES, n_kvec_tiles, BM]`
+    and sum along axis 1. Pass 1 uses `segment_sum` with segment ids
+    `b·n_kvec_tiles + kt` — unsorted under this layout, but `segment_sum`
+    handles arbitrary orderings correctly.
     """
     B = len(pbc_atom_off) - 1
     n_mt_per_b = ((pbc_atom_off[1:] - pbc_atom_off[:-1]) // BM).astype(np.int32)  # [B]
@@ -80,18 +82,11 @@ def _build_dispatch_tables(pbc_atom_off, n_kvec_tiles, BM):
     # inner index within system b: ranges over [0, n_kvec_tiles · n_mt_b)
     inner = np.arange(T, dtype=np.int32) - np.repeat(cumcounts, counts)
 
-    n_mt_each = np.repeat(n_mt_per_b, counts)
-    # pass1 within-system order: outer kt, inner j_atom
-    kt_col = inner // n_mt_each
-    j_atom_col = inner % n_mt_each
-    pass1_flat = np.stack([b_col, kt_col, j_atom_col], axis=1)
-
-    # pass2 within-system order: outer mt, inner j_kvec
+    # outer m_tile, inner k_tile
     mt_col = inner // n_kvec_tiles
-    j_kvec_col = inner % n_kvec_tiles
-    pass2_flat = np.stack([b_col, mt_col, j_kvec_col], axis=1)
+    kt_col = inner % n_kvec_tiles
 
-    return pass1_flat, pass2_flat
+    return np.stack([b_col, mt_col, kt_col], axis=1)
 
 
 def get_batch(
@@ -278,7 +273,7 @@ def get_batch(
         pair_offset += num_p
 
     n_kvec_tiles = K_pad // BK
-    pass1_flat, pass2_flat = _build_dispatch_tables(pbc_atom_off, n_kvec_tiles, BM)
+    dispatch_table = _build_dispatch_table(pbc_atom_off, n_kvec_tiles, BM)
 
     sr_batch = Batch(
         positions=positions,
@@ -304,8 +299,7 @@ def get_batch(
         pbc_segment_atom=pbc_segment_atom,
         pbc_to_flat=pbc_to_flat,
         pbc_atom_mask=pbc_atom_mask_flat,
-        pass1_flat=pass1_flat,
-        pass2_flat=pass2_flat,
+        dispatch_table=dispatch_table,
         # BM/BK are encoded as the shape of a 1-D dummy array so the values
         # survive `jax.device_put` / pytree machinery as static shape
         # metadata (Python ints stored in a namedtuple field would be

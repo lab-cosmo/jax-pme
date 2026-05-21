@@ -82,8 +82,7 @@ def Ewald(
         # kernel's `lax.dynamic_slice` size arguments.
         n_kvec_tiles = batch_pbc.k_grid.shape[1] // batch_pbc.BK.shape[0]
         atom_off = jnp.asarray(batch_pbc.pbc_atom_off)
-        pass1_flat = jnp.asarray(batch_pbc.pass1_flat)
-        pass2_flat = jnp.asarray(batch_pbc.pass2_flat)
+        dispatch_table = jnp.asarray(batch_pbc.dispatch_table)
 
         return (
             kvec,
@@ -93,8 +92,7 @@ def Ewald(
             smearing_pbc,
             pbc_pbc,
             atom_off,
-            pass1_flat,
-            pass2_flat,
+            dispatch_table,
             batch_pbc.BM.shape[0],
             batch_pbc.BK.shape[0],
             n_kvec_tiles,
@@ -152,8 +150,7 @@ def Ewald(
             smearing_pbc,
             pbc_pbc,
             atom_off,
-            pass1_flat,
-            pass2_flat,
+            dispatch_table,
             BM_use,
             BK_use,
             n_kvec_tiles,
@@ -168,8 +165,7 @@ def Ewald(
             kvec,
             W,
             atom_off,
-            pass1_flat,
-            pass2_flat,
+            dispatch_table,
             BM=BM_use,
             BK=BK_use,
             n_kvec_tiles=n_kvec_tiles,

@@ -19,8 +19,8 @@ jaxpme/
 │   └── batching.py     # Batch preparation utilities
 └── batched_tiled/      # Batched Ewald with sum-padded atoms + (BM, BK) tile dispatch
     ├── calculators.py  # batched_tiled.Ewald() — heterogeneous-batch backend
-    ├── batching.py     # Sum-padded layout + pass1_flat/pass2_flat dispatch tables
-    └── kernel.py       # phi_recip_xla_vmap: vmap + segment_sum reciprocal kernel
+    ├── batching.py     # Sum-padded layout + single (b, m_tile, k_tile) dispatch table
+    └── kernel.py       # phi_recip_xla_vmap: vmap + (segment_sum | reshape-sum) reciprocal kernel
 
 tests/
 ├── conftest.py         # REFERENCE_STRUCTURES_DIR constant

@@ -9,9 +9,9 @@ jaxpme/
 ├── calculators.py      # Main API: Ewald(), PME(), P3M() factory functions
 ├── solvers.py          # Real-space and reciprocal-space solvers (ewald, pme, p3m)
 ├── potentials.py       # Coulomb, inverse power-law, range-separated potentials
-├── kspace.py           # K-space computations + p3m_influence() function
+├── kspace.py           # K-space: numpy preprocessing (grids) + jax.numpy JIT ops (p3m_influence, kvectors)
 ├── mesh.py             # Mesh interpolation: lagrange() and bspline() (n=1-5)
-├── utils.py            # Neighbor lists, cell handling (no mixed PBC)
+├── utils.py            # Neighbor lists, cell handling
 ├── prefactors.py       # Unit conversion constants (eV_A, etc.)
 ├── batched_flat/       # Batched Ewald (flat padding strategy)
 └── batched_mixed/      # Batched Ewald (mixed real/reciprocal batching)
@@ -22,6 +22,7 @@ tests/
 ├── conftest.py         # REFERENCE_STRUCTURES_DIR constant
 ├── test_ewald.py       # Core tests (Madelung constants, random structures)
 ├── test_kspace.py      # K-space computation tests (half-space optimization, etc.)
+├── test_slab_correction.py  # 2D PBC: tiling, rotation, forces, MAD-1.5 references
 ├── test_batched_*.py   # Batched implementation tests
 ```
 
@@ -35,6 +36,10 @@ tests/
 
 ### P3M Influence Function
 The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B-spline smoothing. Key detail: for non-orthogonal cells, k-vectors must be **projected onto cell axes** (dot product), not multiplied component-wise. The formula is `kh[i] = (k · cell[i]) / n[i]`.
+
+## Design Notes
+- All preprocessing (k-grid shape, charges, cell) uses **numpy**, not jax.numpy, to avoid unnecessary device allocation. Only JIT-traced compute paths use jax.numpy.
+- `shrink_2d_cell` is only called when `pbc.sum() == 2`
 
 ## Current Limitations
 - PME only supports 4-node Lagrange interpolation

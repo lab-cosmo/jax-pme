@@ -23,7 +23,11 @@ Solver = namedtuple("Solver", ("rspace", "kspace"))
 def _rspace(potential, smearing, charges, r, i, j, full_neighbor_list=False):
     N = charges.shape[0]
 
-    potentials_bare = potential.sr(smearing, r)
+    if smearing is None:
+        # no range separation: sum the bare potential (non-periodic case)
+        potentials_bare = potential.real(r)
+    else:
+        potentials_bare = potential.sr(smearing, r)
 
     pot = jax.ops.segment_sum(charges[j] * potentials_bare, i, num_segments=N)
 

@@ -544,8 +544,9 @@ def test_nonpbc_dimer_analytic():
     np.testing.assert_allclose(np.asarray(forces), [[0, 0, 1.0], [0, 0, -1.0]], atol=1e-12)
 
 
-def test_nonpbc_matches_bruteforce():
-    """Non-PBC energy equals the full all-pairs 1/r sum (no cutoff truncation)."""
+@pytest.mark.parametrize("exponent", [1, 2])
+def test_nonpbc_matches_bruteforce(exponent):
+    """Non-PBC energy equals the all-pairs 1/r^p sum (no cutoff truncation)."""
     rng = np.random.default_rng(0)
     N = 6
     positions = rng.uniform(0.0, 8.0, (N, 3))
@@ -555,12 +556,12 @@ def test_nonpbc_matches_bruteforce():
     atoms = Atoms(f"X{N}", positions=positions, pbc=False)
     atoms.set_initial_charges(charges)
 
-    calc = Ewald()
+    calc = Ewald(exponent=exponent)
     # cutoff smaller than the cluster: non-PBC must still sum *all* pairs
     energy = float(calc.energy(*calc.prepare(atoms, None, 3.0)))
 
     ref = sum(
-        charges[a] * charges[b] / np.linalg.norm(positions[a] - positions[b])
+        charges[a] * charges[b] / np.linalg.norm(positions[a] - positions[b]) ** exponent
         for a in range(N)
         for b in range(a + 1, N)
     )
@@ -603,7 +604,7 @@ def test_nonpbc_full_neighbor_list():
     full = Ewald(full_neighbor_list=True)
 
     inputs_full = full.prepare(atoms, None, 5.0)
-    i, j = inputs_full[3], inputs_full[4]
+    _, _, _, i, j, *_ = inputs_full
     assert len(i) == N * (N - 1)  # both directions of every pair
     pairs = set(zip(i.tolist(), j.tolist()))
     assert all((b, a) in pairs for a, b in pairs)

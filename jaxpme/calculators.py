@@ -66,15 +66,10 @@ def Ewald(
             charges *= atom_mask
 
         if pbc is not None and not np.any(pbc):
-            # non-periodic: bare 1/r over all pairs, no Ewald splitting -- there is
-            # no periodic image to sum, and the reciprocal block divides by the
-            # (zero) volume. prepare() supplies the all-pairs list.
-            N = charges.shape[0]
-            bare = pot.real(r)
-            potentials = jax.ops.segment_sum(charges[j] * bare, i, num_segments=N)
-            if not full_neighbor_list:
-                potentials += jax.ops.segment_sum(charges[i] * bare, j, num_segments=N)
-            potentials = potentials / 2
+            # non-periodic: no Ewald splitting -- there is no periodic image to sum,
+            # and the reciprocal block divides by the (zero) volume. prepare()
+            # supplies the all-pairs list; smearing=None sums the bare potential.
+            potentials = solver.rspace(None, charges, r, i, j)
         else:
             reciprocal_cell = get_reciprocal(cell)
             volume = jnp.abs(jnp.linalg.det(cell))
@@ -111,7 +106,7 @@ def Ewald(
             charges = np.asarray(charges).flatten()
 
         if not pbc.any():
-            # non-periodic: full pair list, summed bare 1/r (no cutoff, no splitting)
+            # non-periodic: all-pairs list (no cutoff -- a finite cluster has no screening)
             if exclusion_radius is not None:
                 # the long-/short-range split is undefined without periodicity
                 raise NotImplementedError(

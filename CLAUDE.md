@@ -47,8 +47,18 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
 ## Current Limitations
 - PME only supports 4-node Lagrange interpolation
 - Mixed PBC (2D) only works in batched implementations, not serial
+- Serial `PME`/`P3M` still return `NaN` for non-PBC structures (volume == 0);
+  only serial `Ewald` and the batched calculators handle non-PBC
 - Power-law potentials raise `NotImplementedError` for mixed PBC corrections
 - `calculators.py` has TODO for PME/P3M parameter tuning logic
+
+## Non-periodic (0D) structures
+- Serial `Ewald` routes `pbc=[F,F,F]` to a bare 1/r sum over *all* pairs
+  (no cutoff, no Ewald splitting), mirroring the batched `NonPeriodic` contract
+- The all-pairs list respects `full_neighbor_list` (half by default, both
+  directions if `True`), so the returned graph stays usable for SR models
+- Serial `Ewald.prepare` therefore returns `charges, *graph, k_grid, smearing, pbc`
+  (one more element than `PME`/`P3M`, which return `..., smearing`)
 
 ## 2D PBC (slab correction)
 - Supports arbitrary triclinic cells (not just orthorhombic)

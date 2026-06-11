@@ -50,13 +50,11 @@ def Ewald(
         cell_shifts,
         k_grid,
         smearing,
+        pbc=None,
         atom_mask=None,
         pair_mask=None,
         distances=None,
-        pbc=None,
     ):
-        reciprocal_cell = get_reciprocal(cell)
-
         if distances is None:
             r = get_distances(cell, positions[i], positions[j], cell_shifts)
             if pair_mask is not None:
@@ -64,18 +62,26 @@ def Ewald(
         else:
             r = distances
 
-        volume = jnp.abs(jnp.linalg.det(cell))
-        kvectors = generate_kvectors(
-            reciprocal_cell, k_grid.shape, dtype=positions.dtype, for_ewald=True
-        )
-
         if atom_mask is not None:
             charges *= atom_mask
 
-        rspace = solver.rspace(smearing, charges, r, i, j)
-        kspace = solver.kspace(smearing, charges, kvectors, positions, volume, cell, pbc)
+        if pbc is not None and not np.any(pbc):
+            # non-periodic: no Ewald splitting -- there is no periodic image to sum,
+            # and the reciprocal block divides by the (zero) volume. prepare()
+            # supplies the all-pairs list; smearing=None sums the bare potential.
+            potentials = solver.rspace(None, charges, r, i, j)
+        else:
+            reciprocal_cell = get_reciprocal(cell)
+            volume = jnp.abs(jnp.linalg.det(cell))
+            kvectors = generate_kvectors(
+                reciprocal_cell, k_grid.shape, dtype=positions.dtype, for_ewald=True
+            )
 
-        potentials = rspace + kspace
+            rspace = solver.rspace(smearing, charges, r, i, j)
+            kspace = solver.kspace(
+                smearing, charges, kvectors, positions, volume, cell, pbc
+            )
+            potentials = rspace + kspace
 
         if atom_mask is not None:
             potentials *= atom_mask
@@ -91,16 +97,33 @@ def Ewald(
         if smearing is None:
             smearing = cutoff / 4.0
 
-        graph = atoms_to_graph(atoms, cutoff, full_list=full_neighbor_list)
+        pbc = np.asarray(atoms.get_pbc())
+        cell = np.asarray(atoms.get_cell().array)
 
         if charges is None:
             charges = np.asarray(atoms.get_initial_charges())
         else:
             charges = np.asarray(charges).flatten()
 
-        k_grid = get_kgrid_ewald(np.asarray(atoms.get_cell().array), lr_wavelength)
+        if not pbc.any():
+            # non-periodic: all-pairs list (no cutoff -- a finite cluster has no screening)
+            if exclusion_radius is not None:
+                # the long-/short-range split is undefined without periodicity
+                raise NotImplementedError(
+                    "exclusion_radius is not supported for non-periodic structures"
+                )
+            positions = np.asarray(atoms.get_positions())
+            i, j = np.triu_indices(len(positions), k=1)
+            if full_neighbor_list:
+                i, j = np.concatenate([i, j]), np.concatenate([j, i])
+            cell_shifts = np.zeros((len(i), 3), dtype=int)
+            graph = (cell, positions, i, j, cell_shifts)
+        else:
+            graph = atoms_to_graph(atoms, cutoff, full_list=full_neighbor_list)
 
-        return charges, *graph, k_grid, smearing
+        k_grid = get_kgrid_ewald(cell, lr_wavelength)
+
+        return charges, *graph, k_grid, smearing, pbc
 
     return Calculator(prepare_fn, potentials_fn, *get_calculate_functions(potentials_fn))
 

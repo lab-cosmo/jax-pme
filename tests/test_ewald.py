@@ -523,3 +523,104 @@ def test_random_structure(
 
         stress_target = jnp.einsum("ab,aA,bB->AB", stress_target, ortho, ortho)
         np.testing.assert_allclose(stress, stress_target, atol=0.0, rtol=rtol_stress)
+
+
+# -- non-periodic structures: bare 1/r sum, no Ewald splitting --
+
+
+def test_nonpbc_dimer_analytic():
+    """+1/-1 dimer at distance 1: E = q1*q2/r = -1, with finite forces and stress."""
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0, 0, 1]], pbc=False)
+    atoms.set_initial_charges([1.0, -1.0])
+
+    calc = Ewald()
+    inputs = calc.prepare(atoms, None, 5.0)
+    energy, forces, stress = calc.energy_forces_stress(*inputs)
+
+    np.testing.assert_allclose(float(energy), -1.0, atol=1e-12)
+    assert np.all(np.isfinite(np.asarray(forces)))
+    assert np.all(np.isfinite(np.asarray(stress)))
+    # force pulls the charges together (atom 0 towards +z, atom 1 towards -z)
+    np.testing.assert_allclose(np.asarray(forces), [[0, 0, 1.0], [0, 0, -1.0]], atol=1e-12)
+
+
+@pytest.mark.parametrize("exponent", [1, 2])
+def test_nonpbc_matches_bruteforce(exponent):
+    """Non-PBC energy equals the all-pairs 1/r^p sum (no cutoff truncation)."""
+    rng = np.random.default_rng(0)
+    N = 6
+    positions = rng.uniform(0.0, 8.0, (N, 3))
+    charges = rng.uniform(-1.0, 1.0, N)
+    charges -= charges.mean()
+
+    atoms = Atoms(f"X{N}", positions=positions, pbc=False)
+    atoms.set_initial_charges(charges)
+
+    calc = Ewald(exponent=exponent)
+    # cutoff smaller than the cluster: non-PBC must still sum *all* pairs
+    energy = float(calc.energy(*calc.prepare(atoms, None, 3.0)))
+
+    ref = sum(
+        charges[a] * charges[b] / np.linalg.norm(positions[a] - positions[b]) ** exponent
+        for a in range(N)
+        for b in range(a + 1, N)
+    )
+    np.testing.assert_allclose(energy, ref, atol=1e-12)
+
+
+def test_nonpbc_matches_batched():
+    """Serial non-PBC honours the same contract as batched_mixed."""
+    from jaxpme.batched_mixed.calculators import Ewald as BatchedEwald
+
+    rng = np.random.default_rng(1)
+    N = 7
+    positions = rng.uniform(0.0, 8.0, (N, 3))
+    charges = rng.uniform(-1.0, 1.0, N)
+
+    atoms = Atoms(f"X{N}", positions=positions, pbc=False)
+    atoms.set_initial_charges(charges)
+
+    serial = Ewald()
+    e_serial, f_serial = serial.energy_forces(*serial.prepare(atoms, None, 5.0))
+
+    batched = BatchedEwald()
+    e_batched, f_batched = batched.energy_forces(*batched.prepare([atoms], cutoff=5.0))
+
+    np.testing.assert_allclose(float(e_serial), float(e_batched[0]), atol=1e-12)
+    np.testing.assert_allclose(np.asarray(f_serial), np.asarray(f_batched)[:N], atol=1e-12)
+
+
+def test_nonpbc_full_neighbor_list():
+    """full_neighbor_list is respected for non-PBC: full pair list, same result."""
+    rng = np.random.default_rng(2)
+    N = 5
+    positions = rng.uniform(0.0, 8.0, (N, 3))
+    charges = rng.uniform(-1.0, 1.0, N)
+
+    atoms = Atoms(f"X{N}", positions=positions, pbc=False)
+    atoms.set_initial_charges(charges)
+
+    half = Ewald()
+    full = Ewald(full_neighbor_list=True)
+
+    inputs_full = full.prepare(atoms, None, 5.0)
+    _, _, _, i, j, *_ = inputs_full
+    assert len(i) == N * (N - 1)  # both directions of every pair
+    pairs = set(zip(i.tolist(), j.tolist()))
+    assert all((b, a) in pairs for a, b in pairs)
+
+    e_half, f_half = half.energy_forces(*half.prepare(atoms, None, 5.0))
+    e_full, f_full = full.energy_forces(*inputs_full)
+
+    np.testing.assert_allclose(float(e_full), float(e_half), atol=1e-12)
+    np.testing.assert_allclose(np.asarray(f_full), np.asarray(f_half), atol=1e-12)
+
+
+def test_nonpbc_exclusion_radius_rejected():
+    """exclusion_radius has no meaning without periodicity -> explicit error."""
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0, 0, 1]], pbc=False)
+    atoms.set_initial_charges([1.0, -1.0])
+
+    calc = Ewald(exclusion_radius=2.0)
+    with pytest.raises(NotImplementedError):
+        calc.prepare(atoms, None, 5.0)

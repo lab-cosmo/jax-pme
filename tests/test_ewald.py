@@ -525,7 +525,7 @@ def test_random_structure(
         np.testing.assert_allclose(stress, stress_target, atol=0.0, rtol=rtol_stress)
 
 
-# -- non-periodic structures (issue #28): bare 1/r sum, no Ewald splitting --
+# -- non-periodic structures: bare 1/r sum, no Ewald splitting --
 
 
 def test_nonpbc_dimer_analytic():
@@ -568,7 +568,7 @@ def test_nonpbc_matches_bruteforce():
 
 
 def test_nonpbc_matches_batched():
-    """Serial non-PBC honours the same contract as batched_mixed (issue #28)."""
+    """Serial non-PBC honours the same contract as batched_mixed."""
     from jaxpme.batched_mixed.calculators import Ewald as BatchedEwald
 
     rng = np.random.default_rng(1)
@@ -587,6 +587,32 @@ def test_nonpbc_matches_batched():
 
     np.testing.assert_allclose(float(e_serial), float(e_batched[0]), atol=1e-12)
     np.testing.assert_allclose(np.asarray(f_serial), np.asarray(f_batched)[:N], atol=1e-12)
+
+
+def test_nonpbc_full_neighbor_list():
+    """full_neighbor_list is respected for non-PBC: full pair list, same result."""
+    rng = np.random.default_rng(2)
+    N = 5
+    positions = rng.uniform(0.0, 8.0, (N, 3))
+    charges = rng.uniform(-1.0, 1.0, N)
+
+    atoms = Atoms(f"X{N}", positions=positions, pbc=False)
+    atoms.set_initial_charges(charges)
+
+    half = Ewald()
+    full = Ewald(full_neighbor_list=True)
+
+    inputs_full = full.prepare(atoms, None, 5.0)
+    i, j = inputs_full[3], inputs_full[4]
+    assert len(i) == N * (N - 1)  # both directions of every pair
+    pairs = set(zip(i.tolist(), j.tolist()))
+    assert all((b, a) in pairs for a, b in pairs)
+
+    e_half, f_half = half.energy_forces(*half.prepare(atoms, None, 5.0))
+    e_full, f_full = full.energy_forces(*inputs_full)
+
+    np.testing.assert_allclose(float(e_full), float(e_half), atol=1e-12)
+    np.testing.assert_allclose(np.asarray(f_full), np.asarray(f_half), atol=1e-12)
 
 
 def test_nonpbc_exclusion_radius_rejected():

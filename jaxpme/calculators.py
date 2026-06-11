@@ -68,11 +68,12 @@ def Ewald(
         if pbc is not None and not np.any(pbc):
             # non-periodic: bare 1/r over all pairs, no Ewald splitting -- there is
             # no periodic image to sum, and the reciprocal block divides by the
-            # (zero) volume. prepare() supplies the full pair list.
+            # (zero) volume. prepare() supplies the all-pairs list.
             N = charges.shape[0]
             bare = pot.real(r)
             potentials = jax.ops.segment_sum(charges[j] * bare, i, num_segments=N)
-            potentials += jax.ops.segment_sum(charges[i] * bare, j, num_segments=N)
+            if not full_neighbor_list:
+                potentials += jax.ops.segment_sum(charges[i] * bare, j, num_segments=N)
             potentials = potentials / 2
         else:
             reciprocal_cell = get_reciprocal(cell)
@@ -118,6 +119,8 @@ def Ewald(
                 )
             positions = np.asarray(atoms.get_positions())
             i, j = np.triu_indices(len(positions), k=1)
+            if full_neighbor_list:
+                i, j = np.concatenate([i, j]), np.concatenate([j, i])
             cell_shifts = np.zeros((len(i), 3), dtype=int)
             graph = (cell, positions, i, j, cell_shifts)
         else:

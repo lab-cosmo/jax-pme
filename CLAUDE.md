@@ -47,6 +47,8 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
 ## Non-periodic (0D) structures
 - Serial `Ewald` routes `pbc=[F,F,F]` to a bare 1/r sum over *all* pairs
   (no cutoff, no Ewald splitting), mirroring the batched `NonPeriodic` contract
+- The all-pairs list respects `full_neighbor_list` (half by default, both
+  directions if `True`), so the returned graph stays usable for SR models
 - Serial `Ewald.prepare` therefore returns `charges, *graph, k_grid, smearing, pbc`
   (one more element than `PME`/`P3M`, which return `..., smearing`)
 

@@ -210,7 +210,7 @@ def inverse_power_law(exponent):
     # peff > 0 (exponent < 3). Following torch-pme, we use closed forms per
     # integer exponent instead.
     if exponent not in (1, 2, 3, 4, 5, 6):
-        raise ValueError(f"Unsupported exponent: {exponent}")
+        raise ValueError(f"Unsupported exponent: {exponent} (must be an integer in 1..6)")
 
     def gamma(x):
         return jnp.exp(gammaln(x))

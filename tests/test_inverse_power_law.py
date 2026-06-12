@@ -37,6 +37,13 @@ def cscl():
     return atoms, charges
 
 
+def charged():
+    # net charge: exercises the k=0 term (background for p < 3, lr_k0 for p > 3)
+    atoms = Atoms("Na", positions=[[0.0, 0.0, 0.0]], cell=np.eye(3), pbc=True)
+    charges = np.array([1.0])
+    return atoms, charges
+
+
 def direct_lattice_sum(atoms, charges, exponent, n_images):
     # brute-force E = 1/2 sum_{ij, n}' q_i q_j / |r_ij + nL|^p over a cube of images
     positions = atoms.get_positions()
@@ -101,10 +108,32 @@ def test_ewald_vs_direct_sum(exponent, rtol):
     np.testing.assert_allclose(float(energy), reference, rtol=rtol)
 
 
+# for p > 3 the lattice sum of a charged cell converges absolutely, but only
+# if the finite k=0 term (lr_k0) is included -> exercises it end-to-end.
+# p = 4 is omitted: the cube-summed reference converges too slowly (~1/N)
+@pytest.mark.parametrize("exponent,rtol", [(5, 3e-3), (6, 1e-4)])
+def test_ewald_vs_direct_sum_charged(exponent, rtol):
+    atoms, charges = charged()
+
+    calc = Ewald(exponent=exponent)
+    energy = calc.energy(*calc.prepare(atoms, charges, 6.0))
+
+    reference = direct_lattice_sum(atoms, charges, exponent, n_images=24)
+
+    np.testing.assert_allclose(float(energy), reference, rtol=rtol)
+
+
+@pytest.mark.parametrize("system", [cscl, charged])
 @pytest.mark.parametrize("exponent", EXPONENTS)
-def test_ewald_parameter_independence(exponent):
-    # the result must not depend on the smearing / cutoff / k-grid choice
-    atoms, charges = cscl()
+def test_ewald_parameter_independence(exponent, system):
+    # the result must not depend on the smearing / cutoff / k-grid choice.
+    # for a charged cell this requires the correct k=0 handling: background
+    # correction for p < 3, lr_k0 for p > 3. p = 3 is excluded there, since
+    # the energy of a charged cell diverges
+    if system is charged and exponent == 3:
+        pytest.skip("charged cell energy diverges for p = 3")
+
+    atoms, charges = system()
     calc = Ewald(exponent=exponent)
 
     energy_a = calc.energy(*calc.prepare(atoms, charges, 5.0, 0.5, 0.9))

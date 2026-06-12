@@ -8,7 +8,7 @@ from scipy.special import exp1 as scipy_exp1
 from scipy.special import gamma as scipy_gamma
 from scipy.special import gammaincc as scipy_gammaincc
 
-from jaxpme import Ewald
+from jaxpme import P3M, PME, Ewald
 from jaxpme.potentials import inverse_power_law, potential
 
 jax.config.update("jax_enable_x64", True)
@@ -140,6 +140,63 @@ def test_ewald_parameter_independence(exponent, system):
     energy_b = calc.energy(*calc.prepare(atoms, charges, 8.0, 0.4, 1.4))
 
     np.testing.assert_allclose(float(energy_a), float(energy_b), rtol=1e-6)
+
+
+@pytest.mark.parametrize("calculator", [PME, P3M])
+@pytest.mark.parametrize("exponent", [4, 5, 6])
+def test_mesh_calculators_vs_ewald(calculator, exponent):
+    # the mesh k-grid contains k=0 once, so charged cells pick up lr_k0
+    # through the FFT path; rtol is set by mesh discretization error
+    for system in (cscl, charged):
+        atoms, charges = system()
+
+        calc = calculator(exponent=exponent)
+        energy = calc.energy(*calc.prepare(atoms, charges, 6.0, 0.125, 1.0))
+
+        serial = Ewald(exponent=exponent)
+        reference = serial.energy(*serial.prepare(atoms, charges, 6.0))
+
+        np.testing.assert_allclose(float(energy), float(reference), rtol=2e-4)
+
+
+@pytest.mark.parametrize("halfspace", [False, True])
+@pytest.mark.parametrize("exponent", EXPONENTS)
+def test_batched_mixed_vs_serial(exponent, halfspace):
+    # mixed-size batch -> zero-padded k-grids; the charged structure
+    # exercises the explicit k=0 term in the solver for both halfspace modes
+    from jaxpme.batched_mixed.calculators import Ewald as BatchedEwald
+
+    systems = [cscl, charged] if exponent != 3 else [cscl]
+    structures = []
+    for system in systems:
+        atoms, charges = system()
+        atoms.set_initial_charges(charges)
+        structures.append(atoms)
+
+    calc = BatchedEwald(custom_potential=inverse_power_law(exponent), halfspace=halfspace)
+    energies = calc.energy(*calc.prepare(structures, 6.0))
+
+    serial = Ewald(exponent=exponent)
+    for k, atoms in enumerate(structures):
+        reference = serial.energy(*serial.prepare(atoms, None, 6.0))
+        np.testing.assert_allclose(float(energies[k]), float(reference), rtol=1e-12)
+
+
+@pytest.mark.parametrize("exponent", EXPONENTS)
+def test_batched_flat_vs_serial(exponent):
+    from jaxpme.batched_flat.calculators import Ewald as FlatEwald
+
+    systems = [cscl, charged] if exponent != 3 else [cscl]
+    structures, all_charges = zip(*[system() for system in systems])
+
+    calc = FlatEwald(exponent=exponent)
+    batch = calc.prepare(list(structures), list(all_charges), 6.0)
+    energies = calc.energy(*batch)
+
+    serial = Ewald(exponent=exponent)
+    for k, (atoms, charges) in enumerate(zip(structures, all_charges)):
+        reference = serial.energy(*serial.prepare(atoms, charges, 6.0))
+        np.testing.assert_allclose(float(energies[k]), float(reference), rtol=1e-12)
 
 
 @pytest.mark.parametrize("exponent", EXPONENTS)

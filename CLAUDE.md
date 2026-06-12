@@ -61,6 +61,11 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
 - For p > 3 the kernel has a finite k→0 limit, supplied via the optional
   `lr_k0` field on `RawPotential` (defaults to `None` = 0 = neutralizing
   background); the background correction is zero for p ≥ 3
+- The `ewald` solver masks k²==0 out of the k-sum and adds the k=0 term
+  explicitly once (`lr_k0 · Σq / V`): halfspace grids drop k=0, full grids
+  contain it, and `batched_mixed` pads k-grids with zero vectors — the
+  explicit term treats all three uniformly. `batched_flat` and the mesh
+  solvers (PME/P3M) pick up k=0 through their own grids with weight 1
 - `_exp1` in `potentials.py` is a custom E1 implementation:
   `jax.scipy.special.exp1` takes ~20s to compile and its jvp leaks tracers
 

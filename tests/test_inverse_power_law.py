@@ -142,21 +142,21 @@ def test_ewald_parameter_independence(exponent, system):
     np.testing.assert_allclose(float(energy_a), float(energy_b), rtol=1e-6)
 
 
+@pytest.mark.parametrize("system", [cscl, charged])
 @pytest.mark.parametrize("calculator", [PME, P3M])
 @pytest.mark.parametrize("exponent", [4, 5, 6])
-def test_mesh_calculators_vs_ewald(calculator, exponent):
+def test_mesh_calculators_vs_ewald(calculator, exponent, system):
     # the mesh k-grid contains k=0 once, so charged cells pick up lr_k0
     # through the FFT path; rtol is set by mesh discretization error
-    for system in (cscl, charged):
-        atoms, charges = system()
+    atoms, charges = system()
 
-        calc = calculator(exponent=exponent)
-        energy = calc.energy(*calc.prepare(atoms, charges, 6.0, 0.125, 1.0))
+    calc = calculator(exponent=exponent)
+    energy = calc.energy(*calc.prepare(atoms, charges, 6.0, 0.125, 1.0))
 
-        serial = Ewald(exponent=exponent)
-        reference = serial.energy(*serial.prepare(atoms, charges, 6.0))
+    serial = Ewald(exponent=exponent)
+    reference = serial.energy(*serial.prepare(atoms, charges, 6.0))
 
-        np.testing.assert_allclose(float(energy), float(reference), rtol=2e-4)
+    np.testing.assert_allclose(float(energy), float(reference), rtol=2e-4)
 
 
 @pytest.mark.parametrize("halfspace", [False, True])

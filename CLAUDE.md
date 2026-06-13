@@ -22,6 +22,7 @@ tests/
 ├── conftest.py         # REFERENCE_STRUCTURES_DIR constant
 ├── test_ewald.py       # Core tests (Madelung constants, random structures)
 ├── test_kspace.py      # K-space computation tests (half-space optimization, etc.)
+├── test_inverse_power_law.py  # 1/r^p potentials: closed forms, direct-sum references
 ├── test_slab_correction.py  # 2D PBC: tiling, rotation, forces, MAD-1.5 references
 ├── test_batched_*.py   # Batched implementation tests
 ```
@@ -49,8 +50,24 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
 - Mixed PBC (2D) only works in batched implementations, not serial
 - Serial `PME`/`P3M` still return `NaN` for non-PBC structures (volume == 0);
   only serial `Ewald` and the batched calculators handle non-PBC
-- Power-law potentials raise `NotImplementedError` for mixed PBC corrections
+- Power-law potentials return `NaN` for mixed PBC corrections (no slab correction)
+- Power-law exponents limited to integers 1-6 (`ValueError` otherwise)
 - `calculators.py` has TODO for PME/P3M parameter tuning logic
+
+## Inverse power-law potentials (1/r^p)
+- Integer exponents 1-6 supported (issue #20, ported from torch-pme):
+  the k-space kernel Γ(peff, x)/x^peff with peff = (3-p)/2 uses closed forms
+  per exponent, since generic `gammaincc` only handles peff > 0 (p < 3)
+- For p > 3 the kernel has a finite k→0 limit, supplied via the optional
+  `lr_k0` field on `RawPotential` (defaults to `None` = 0 = neutralizing
+  background); the background correction is zero for p ≥ 3
+- The `ewald` solver masks k²==0 out of the k-sum and adds the k=0 term
+  explicitly once (`lr_k0 · Σq / V`): halfspace grids drop k=0, full grids
+  contain it, and `batched_mixed` pads k-grids with zero vectors — the
+  explicit term treats all three uniformly. `batched_flat` and the mesh
+  solvers (PME/P3M) pick up k=0 through their own grids with weight 1
+- `_exp1` in `potentials.py` is a custom E1 implementation:
+  `jax.scipy.special.exp1` takes ~20s to compile and its jvp leaks tracers
 
 ## Non-periodic (0D) structures
 - Serial `Ewald` routes `pbc=[F,F,F]` to a bare 1/r sum over *all* pairs

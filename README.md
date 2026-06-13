@@ -55,7 +55,7 @@ They are instantiated just like any other class, by calling
 from jaxpme import Ewald, PME, P3M
 
 calculator = Ewald(
-	exponent=1,  # corresponds to electrostatics
+	exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
 	exclusion_radius=None,  # if this is not None, purely long-range potentials are computed (see preprint)
 	prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
 	custom_potential=None,  # mostly for testing -- you can define custom potential functions
@@ -63,7 +63,7 @@ calculator = Ewald(
 	)
 
 calculator = PME(
-    exponent=1,  # corresponds to electrostatics
+    exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
     exclusion_radius=None,  # if this is not None, purely long-range potentials are computed (see preprint)
     prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
     interpolation_nodes=4,  # currently only 4 is supported
@@ -72,7 +72,7 @@ calculator = PME(
 	)
 
 calculator = P3M(
-    exponent=1,  # corresponds to electrostatics
+    exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
     exclusion_radius=None,  # if this is not None, purely long-range potentials are computed (see preprint)
     prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
     interpolation_nodes=4,  # B-spline interpolation, supports 1-5

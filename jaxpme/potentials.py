@@ -58,7 +58,9 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
     def lr(smearing, k2):
         mask = k2 == 0.0
         masked = jnp.where(mask, 1e-6, k2)
-        return jnp.where(mask, 0.0, pot.lr_k2(smearing, masked))
+        lr_k0 = getattr(pot, "lr_k0", None)
+        k0 = 0.0 if lr_k0 is None else lr_k0(smearing)
+        return jnp.where(mask, k0, pot.lr_k2(smearing, masked))
 
     def real(r):
         mask = r == 0
@@ -88,6 +90,9 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
 
 
 # -- low-level implementation of potentials --
+#
+# lr_k0 gives the k->0 limit of lr_k2 (used in place of the masked k=0 term);
+# it is optional (None means 0, i.e. a neutralizing background).
 RawPotential = namedtuple(
     "RawPotential",
     (
@@ -98,7 +103,9 @@ RawPotential = namedtuple(
         "correction_background",
         "correction_self",
         "correction_pbc",
+        "lr_k0",
     ),
+    defaults=(None,),
 )
 
 
@@ -159,18 +166,86 @@ def coulomb():
     )
 
 
+@jax.custom_jvp
+def _exp1(x):
+    # exponential integral E1, x > 0: power series below 1, continued fraction
+    # above (same scheme as scipy/torch-pme). jax.scipy.special.exp1 is avoided
+    # since it takes ~20s to compile and its jvp leaks tracers (jax v0.4.30).
+    euler = 0.577215664901532860606512090082402431
+
+    x_small = jnp.minimum(x, 1.0)
+    x_large = jnp.maximum(x, 1.0)
+
+    def series_step(k, carry):
+        e1, r = carry
+        r = -r * k * x_small / (k + 1.0) ** 2
+        return e1 + r, r
+
+    ones = jnp.ones_like(x)
+    e1, _ = jax.lax.fori_loop(1, 26, series_step, (ones, ones))
+    small = -euler - jnp.log(x_small) + x_small * e1
+
+    def cf_step(i, t0):
+        k = 100 - i
+        return k / (1.0 + k / (x_large + t0))
+
+    t0 = jax.lax.fori_loop(0, 100, cf_step, jnp.zeros_like(x))
+    large = jnp.exp(-x_large) / (x_large + t0)
+
+    return jnp.where(x <= 1.0, small, large)
+
+
+@_exp1.defjvp
+def _exp1_jvp(primals, tangents):
+    (x,) = primals
+    (dx,) = tangents
+    return _exp1(x), -jnp.exp(-x) / x * dx
+
+
 def inverse_power_law(exponent):
-    from jax.scipy.special import gammainc, gammaincc, gammaln
+    from jax.scipy.special import erfc, gammainc, gammaln
+
+    # The reciprocal-space kernel is Gamma(peff, x) / x**peff with
+    # peff = (3 - exponent)/2, which the generic gammaincc only handles for
+    # peff > 0 (exponent < 3). Following torch-pme, we use closed forms per
+    # integer exponent instead.
+    if exponent not in (1, 2, 3, 4, 5, 6):
+        raise ValueError(f"Unsupported exponent: {exponent} (must be an integer in 1..6)")
 
     def gamma(x):
         return jnp.exp(gammaln(x))
 
-    def lr_k2(smearing, k2):
-        peff = (3 - exponent) / 2
-        factor = jnp.pi**1.5 / gamma(exponent / 2) * (2 * smearing**2) ** peff
-        x = 0.5 * smearing**2 * k2
+    def gammaincc_over_powerlaw(x):
+        # Gamma((3 - exponent)/2, x) / x**((3 - exponent)/2)
+        if exponent == 1:
+            return jnp.exp(-x) / x
+        if exponent == 2:
+            return jnp.sqrt(jnp.pi / x) * erfc(jnp.sqrt(x))
+        if exponent == 3:
+            return _exp1(x)
+        if exponent == 4:
+            return 2 * (jnp.exp(-x) - jnp.sqrt(jnp.pi * x) * erfc(jnp.sqrt(x)))
+        if exponent == 5:
+            return jnp.exp(-x) - x * _exp1(x)
+        if exponent == 6:
+            return (
+                (2 - 4 * x) * jnp.exp(-x) + 4 * jnp.sqrt(jnp.pi * x**3) * erfc(jnp.sqrt(x))
+            ) / 3
 
-        return (factor * gammaincc(peff, x) / x**peff) * gamma(peff)
+    def lr_prefactor(smearing):
+        peff = (3 - exponent) / 2
+        return jnp.pi**1.5 / gamma(exponent / 2) * (2 * smearing**2) ** peff
+
+    def lr_k2(smearing, k2):
+        x = 0.5 * smearing**2 * k2
+        return lr_prefactor(smearing) * gammaincc_over_powerlaw(x)
+
+    def lr_k0(smearing):
+        # for exponent > 3 the kernel has a finite k->0 limit; for <= 3 the
+        # divergent k=0 term is dropped (neutralizing background instead)
+        if exponent <= 3:
+            return jnp.zeros_like(smearing)
+        return lr_prefactor(smearing) * 2 / (exponent - 3)
 
     def lr_r(smearing, r):
         x = 0.5 * r**2 / smearing**2
@@ -185,6 +260,10 @@ def inverse_power_law(exponent):
         return r ** (-exponent)
 
     def correction_background(smearing):
+        # diverges at exponent 3 and is not needed beyond
+        # (see SI of https://doi.org/10.48550/arXiv.2412.03281)
+        if exponent >= 3:
+            return jnp.zeros_like(smearing)
         factor = jnp.pi**1.5 * (2 * smearing**2) ** ((3 - exponent) / 2)
         factor /= (3 - exponent) * gamma(exponent / 2)
         return factor
@@ -202,5 +281,12 @@ def inverse_power_law(exponent):
         return jax.lax.cond(is_3d, lambda: zeros, lambda: nans)
 
     return RawPotential(
-        sr_r, lr_r, lr_k2, real, correction_background, correction_self, correction_pbc
+        sr_r,
+        lr_r,
+        lr_k2,
+        real,
+        correction_background,
+        correction_self,
+        correction_pbc,
+        lr_k0,
     )

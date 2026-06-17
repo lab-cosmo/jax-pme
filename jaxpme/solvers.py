@@ -120,7 +120,10 @@ def ewald(potential, full_neighbor_list=False, halfspace=False):
         # positions: [i, 3]
         k2 = jax.lax.square(kvectors).sum(axis=-1)  # -> [k]
 
-        G = potential.lr(smearing, k2) * g_factor
+        # k=0 is excluded from the sum and added back once below: halfspace
+        # grids drop it, full grids contain it, and batching pads k-grids with
+        # zero vectors -- this treats all three uniformly
+        G = jnp.where(k2 == 0.0, 0.0, potential.lr(smearing, k2) * g_factor)
         trig_args = kvectors @ (positions.T)  # -> [k, i]
 
         cos_all = jnp.cos(trig_args)
@@ -132,6 +135,9 @@ def ewald(potential, full_neighbor_list=False, halfspace=False):
             return jnp.sum(G * c * cos_summed + G * s * sin_summed)
 
         pot = jax.vmap(potential_f, in_axes=(1, 1))(cos_all, sin_all)
+
+        # the k=0 term, finite for some potentials (1/r^p with p > 3)
+        pot += potential.lr(smearing, jnp.zeros(())) * jnp.sum(charges)
 
         pot /= volume
 

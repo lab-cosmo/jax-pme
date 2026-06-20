@@ -296,6 +296,78 @@ def test_matches_batched_mixed():
     )
 
 
+@pytest.mark.parametrize("num_k", [60, 90, 150])
+def test_num_k_pathway_matches_mixed(num_k):
+    """num_k pathway: with `cutoff` omitted it must be derived from the k-grid
+    (lr_wavelength · 8), matching batched_mixed.
+
+    Every other tiled test pins `cutoff` (and `smearing`) to values already
+    balanced against `num_k`, so the derivation is never exercised. Here we pass
+    `num_k` alone on both backends; if tiled left the cutoff underived, the
+    real-space sum truncates against the num_k-derived smearing and the energies
+    drift several percent from the reference.
+    """
+    from jaxpme.batched_mixed.calculators import Ewald as MixedEwald
+    from jaxpme.batched_tiled.calculators import Ewald as TiledEwald
+
+    structures = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index=":3")
+
+    ct = TiledEwald(prefactor=1.0)
+    ch_t, sr_t, nopbc_t, pbc_t = ct.prepare(structures, num_k=num_k)
+    E_t, F_t, S_t = ct.energy_forces_stress(ch_t, sr_t, nopbc_t, pbc_t)
+
+    cm = MixedEwald(prefactor=1.0)
+    ch_m, sr_m, nopbc_m, pbc_m = cm.prepare(structures, num_k=num_k)
+    E_m, F_m, S_m = cm.energy_forces_stress(ch_m, sr_m, nopbc_m, pbc_m)
+
+    np.testing.assert_allclose(
+        np.array(E_t[sr_t.structure_mask]),
+        np.array(E_m[sr_m.structure_mask]),
+        rtol=1e-10,
+    )
+    np.testing.assert_allclose(
+        np.array(F_t[sr_t.atom_mask]),
+        np.array(F_m[sr_m.atom_mask]),
+        rtol=1e-9,
+        atol=1e-15,
+    )
+    np.testing.assert_allclose(
+        np.array(S_t[sr_t.structure_mask]),
+        np.array(S_m[sr_m.structure_mask]),
+        rtol=1e-9,
+        atol=1e-15,
+    )
+
+
+def test_derived_cutoff_converges_real_space():
+    """A cutoff that follows num_k (lr_wavelength · 8) keeps the real-space sum
+    converged; a fixed cutoff decoupled from num_k does not. Locks in *why* the
+    derivation matters, not just that two backends agree.
+    """
+    from jaxpme.batched_tiled.calculators import Ewald as TiledEwald
+    from jaxpme.kspace import lr_wavelength_for_num_k
+
+    atoms = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index="0")
+    num_k = 80  # coarse grid -> large smearing -> demands a large real-space cutoff
+    lr = lr_wavelength_for_num_k(atoms.get_cell().array, num_k)
+
+    calc = TiledEwald(prefactor=1.0)
+
+    def energy(cutoff):
+        ch, sr, nop, pbc = calc.prepare([atoms], num_k=num_k, cutoff=cutoff)
+        return float(
+            np.array(calc.energy(ch, sr, nop, pbc))[np.array(sr.structure_mask)][0]
+        )
+
+    e_derived = energy(None)  # cutoff = lr * 8
+    e_explicit = energy(lr * 8.0)
+    np.testing.assert_allclose(e_derived, e_explicit, rtol=1e-12)
+
+    # a plausible-looking but num_k-decoupled cutoff under-converges badly
+    e_truncated = energy(5.0)
+    assert abs(e_truncated - e_derived) / abs(e_derived) > 1e-2
+
+
 # ---------------------------------------------------------------------------
 # Helpers shared by cross-system isolation / physics invariant tests
 # ---------------------------------------------------------------------------

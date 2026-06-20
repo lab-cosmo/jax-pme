@@ -319,14 +319,18 @@ def get_batch(
     return charges, sr_batch, nonperiodic_batch, periodic_batch
 
 
-def prepare(atoms, num_k, cutoff, smearing=None, halfspace=True, dtype=np.float64):
+def prepare(atoms, num_k, cutoff=None, smearing=None, halfspace=True, dtype=np.float64):
     """Per-structure preprocessing.
 
-    `num_k` is required: it sets the per-cell K target via
-    `lr_wavelength_for_num_k`. Actual K_b counts vary slightly across cells
-    because of axis-rounding in `get_kgrid_ewald_shape`; the batcher max-pads
-    them to a common K_pad. `cutoff` is the real-space neighbor list radius.
-    `smearing` defaults to `lr_wavelength · 2`.
+    `num_k` fixes the reciprocal grid via `lr_wavelength_for_num_k` (K_b counts
+    vary slightly across cells from axis-rounding in `get_kgrid_ewald_shape`;
+    the batcher max-pads to a common K_pad). The real-space `cutoff` and
+    `smearing` follow it, matching `batched_mixed`: when omitted,
+    `cutoff = lr_wavelength · 8` and `smearing = lr_wavelength · 2`, keeping real
+    and reciprocal space balanced. An explicit `cutoff` overrides only the
+    real-space radius — `smearing` still tracks `num_k` — so a cutoff below
+    `lr_wavelength · 8` under-converges the real-space sum unless `smearing` is
+    pinned too.
     """
     from jaxpme.kspace import lr_wavelength_for_num_k
 
@@ -340,11 +344,16 @@ def prepare(atoms, num_k, cutoff, smearing=None, halfspace=True, dtype=np.float6
     else:
         effective_cell = cell
 
+    # num_k is always given, so lr_wavelength is always defined (not gated on pbc)
+    lr_wavelength = lr_wavelength_for_num_k(effective_cell, num_k)
+    if cutoff is None:
+        cutoff = lr_wavelength * 8.0
     if pbc.any():
-        lr_wavelength = lr_wavelength_for_num_k(effective_cell, num_k)
         if smearing is None:
             smearing = lr_wavelength * 2.0
     else:
+        # non-pbc uses bare 1/r over all pairs: smearing is unused, and the
+        # derived cutoff only sizes the masked-out neighbor list.
         lr_wavelength = None
 
     structure = to_structure(atoms, cutoff, dtype=dtype)

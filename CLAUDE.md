@@ -32,7 +32,7 @@ tests/
 ## Key APIs
 - **Serial**: `Ewald()`, `PME()`, or `P3M()` → `.prepare()` → `.energy()/.potentials()/.energy_forces()/.energy_forces_stress()`
 - **Batched**: `jaxpme.batched_mixed.Ewald()` → `.prepare([atoms_list], cutoff)` → same methods but batched
-- **Tiled batched**: `jaxpme.batched_tiled.Ewald()` → `.prepare([atoms_list], num_k, cutoff=None)` — sum-pads atoms per system (heterogeneous-batch friendly), routes reciprocal sum through tile-dispatched XLA kernel. `num_k` is REQUIRED and fixes the k-grid; `cutoff` is optional and, when omitted, is derived from it as `lr_wavelength · 8` (mirrors `batched_mixed`).
+- **Tiled batched**: `jaxpme.batched_tiled.Ewald()` → `.prepare([atoms_list], num_k)` — sum-pads atoms per system (heterogeneous-batch friendly), routes reciprocal sum through tile-dispatched XLA kernel. `num_k` is the single required knob: it fixes the k-grid and the real-space `cutoff` derives from it, so `cutoff` is normally omitted (pass it only to override). See README for the convention.
 
 ### PME vs P3M
 - **PME**: Lagrange interpolation (4-node). Faster but forces less smooth.
@@ -48,8 +48,7 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
   handle non-PBC via bare 1/r) — see open issue for fallback
 - Power-law potentials raise `NotImplementedError` for mixed PBC corrections
 - `calculators.py` has TODO for PME/P3M parameter tuning logic
-- `batched_tiled.prepare` requires `num_k` (it has no cutoff-only path like
-  `batched_mixed`); `cutoff` is optional and derived from `num_k` when omitted
+- `batched_tiled.prepare` requires `num_k` and has no cutoff-only path (unlike `batched_mixed`)
 
 ## 2D PBC (slab correction)
 - Supports arbitrary triclinic cells (not just orthorhombic)

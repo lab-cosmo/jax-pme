@@ -352,8 +352,11 @@ def prepare(atoms, num_k, cutoff=None, smearing=None, halfspace=True, dtype=np.f
         if smearing is None:
             smearing = lr_wavelength * 2.0
     else:
-        # non-pbc uses bare 1/r over all pairs: smearing is unused, and the
-        # derived cutoff only sizes the masked-out neighbor list.
+        # non-pbc physics is bare 1/r over *all* pairs (triu_indices in to_lr),
+        # so cutoff does not affect the result here — it only feeds the vesin
+        # list in to_structure, whose pairs land in the PBC real-space term and
+        # are masked off for non-pbc atoms (it just sizes the padded pair
+        # buffer). smearing is likewise unused; None signals both.
         lr_wavelength = None
 
     structure = to_structure(atoms, cutoff, dtype=dtype)

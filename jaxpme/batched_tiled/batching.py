@@ -344,22 +344,19 @@ def prepare(atoms, num_k, cutoff=None, smearing=None, halfspace=True, dtype=np.f
     else:
         effective_cell = cell
 
-    # num_k is always given, so lr_wavelength is always defined (not gated on pbc)
-    lr_wavelength = lr_wavelength_for_num_k(effective_cell, num_k)
-    if cutoff is None:
-        cutoff = lr_wavelength * 8.0
     if pbc.any():
+        lr_wavelength = lr_wavelength_for_num_k(effective_cell, num_k)
+        if cutoff is None:
+            cutoff = lr_wavelength * 8.0
         if smearing is None:
             smearing = lr_wavelength * 2.0
+        structure = to_structure(atoms, cutoff, dtype=dtype)
     else:
-        # non-pbc physics is bare 1/r over *all* pairs (triu_indices in to_lr),
-        # so cutoff does not affect the result here — it only feeds the vesin
-        # list in to_structure, whose pairs land in the PBC real-space term and
-        # are masked off for non-pbc atoms (it just sizes the padded pair
-        # buffer). smearing is likewise unused; None signals both.
+        # non-pbc real space is the bare 1/r sum over *all* pairs (built in
+        # to_lr), so the cutoff neighbor list would only be masked off here.
+        # Skip it (cutoff=None -> empty list) instead of carrying dead pairs.
         lr_wavelength = None
-
-    structure = to_structure(atoms, cutoff, dtype=dtype)
+        structure = to_structure(atoms, cutoff=None, dtype=dtype)
     structure["cell"] = effective_cell
 
     smearing_out, lr = to_lr(structure, lr_wavelength, smearing, halfspace=halfspace)

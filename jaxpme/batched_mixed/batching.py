@@ -337,7 +337,15 @@ def to_structure(atoms, cutoff, dtype=np.float64):
     structure["atomic_numbers"] = atoms.get_atomic_numbers().astype(int)
     structure["charges"] = atoms.get_initial_charges().astype(dtype)
 
-    if atoms.pbc.sum() in (2, 3):
+    if cutoff is None:
+        # no neighbor list: caller handles real space without one (e.g. non-pbc
+        # bare 1/r over all pairs, where a cutoff list would be unused)
+        centers = others = np.zeros(0, dtype=int)
+        D = np.zeros((0, 3), dtype=dtype)
+        S = np.zeros((0, 3), dtype=int)
+        if (structure["cell"] == 0).all():
+            structure["cell"] = np.eye(3)
+    elif atoms.pbc.sum() in (2, 3):
         centers, others, D, S = neighbor_list("ijDS", atoms, cutoff)
     elif atoms.pbc.any():
         raise ValueError("we support: 3D pbc, 2D pbc, no pbc. received neither.")

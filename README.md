@@ -122,7 +122,7 @@ All three accept lists of `ase.Atoms` in `prepare` and handle padding/masking in
 
 `batched_tiled` is a second Ewald backend designed for heterogeneous batches: atoms are **sum-padded per system** (each system padded to `⌈N_b/BM⌉·BM` atoms, concatenated into one flat array) rather than max-padded to the batch's largest system. The reciprocal sum runs through a pure-JAX tile-dispatched kernel over fixed-size `(BM × BK)` work tiles — `vmap + segment_sum` for pass 1's structure factors, `vmap + reshape-sum` for pass 2's per-atom potential. Differentiates cleanly through autograd, including stress, with no `custom_vjp`. Trade-offs vs `batched_mixed`:
 
-- **`num_k` is required** on `prepare` (sets per-cell K target via `lr_wavelength_for_num_k`). The K axis stays rectangular across the batch, so all systems share `K_pad`; pick `num_k` once and tune Ewald α to shift work between real and reciprocal space.
+- **`num_k` is required** on `prepare` and fixes the reciprocal grid (per-cell K target via `lr_wavelength_for_num_k`; the K axis stays rectangular so all systems share `K_pad`). The real-space `cutoff` follows it: omit it and it is derived as `lr_wavelength · 8` (with `smearing = lr_wavelength · 2`), matching `batched_mixed`, so real and reciprocal space stay balanced. An explicit `cutoff` overrides only the real-space radius (`smearing` still tracks `num_k`).
 - **Tile sizes `(BM, BK)` are fixed at prepare time** (defaults `BM=32, BK=128`). They drive both the per-system atom padding and the kernel tile dimensions.
 - Lower memory and faster on heterogeneous batches where system sizes vary by a lot (small molecules + larger crystals/MOFs in the same batch).
 

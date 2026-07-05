@@ -288,11 +288,13 @@ def Ewald(
     def prepare_fn(
         atomss,
         num_k,
-        cutoff,
+        cutoff=None,
         smearing=None,
         BM=32,
         BK=128,
     ):
+        # `cutoff`/`smearing` default to balanced values from `num_k`; see
+        # `batching.prepare`.
         if not halfspace:
             # full-k-space path still works; flag kept for parity with
             # batched_mixed where `num_k` was halfspace-only.

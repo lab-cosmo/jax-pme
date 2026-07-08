@@ -159,3 +159,31 @@ def test_dispatch_table_exhaustive_coverage():
         f"  Missing: {expected - actual}\n"
         f"  Extra:   {actual - expected}"
     )
+
+
+def test_prepare_nonpbc_keeps_identity_cell():
+    """to_structure normalizes zero non-PBC cells to the identity; prepare's
+    effective-cell override must not leak the raw zeros back in (singular
+    under inv() downstream, e.g. for cells indexed by padding pbc rows)."""
+    from jaxpme.batched_tiled.batching import get_batch, prepare
+
+    rng = np.random.default_rng(0)
+    atoms = Atoms(numbers=[1] * 4, positions=rng.uniform(0, 3.0, (4, 3)), pbc=False)
+    atoms.set_initial_charges(np.array([1.0, -1.0, 1.0, -1.0]))
+
+    structure = prepare(atoms, num_k=_NUM_K, cutoff=_CUTOFF)
+    np.testing.assert_array_equal(structure["cell"], np.eye(3))
+
+    _, sr, _, _ = get_batch(
+        [structure],
+        num_structures=2,
+        num_structures_pbc=1,
+        num_atoms=8,
+        num_atoms_pbc=32,
+        num_pairs=32,
+        num_pairs_nonpbc=8,
+        num_k=128,
+        BM=32,
+        BK=128,
+    )
+    np.testing.assert_array_equal(sr.cell[0], np.eye(3))

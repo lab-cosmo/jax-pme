@@ -357,7 +357,11 @@ def prepare(atoms, num_k, cutoff=None, smearing=None, halfspace=True, dtype=np.f
         # Skip it (cutoff=None -> empty list) instead of carrying dead pairs.
         lr_wavelength = None
         structure = to_structure(atoms, cutoff=None, dtype=dtype)
-    structure["cell"] = effective_cell
+    # only periodic structures carry an effective cell; for non-PBC, keep
+    # to_structure's identity normalization (a raw zero cell would leak
+    # back in and is singular under inv() downstream)
+    if pbc.any():
+        structure["cell"] = effective_cell
 
     smearing_out, lr = to_lr(structure, lr_wavelength, smearing, halfspace=halfspace)
 

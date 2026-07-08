@@ -260,7 +260,11 @@ def prepare(
         raise ValueError("one of cutoff or num_k is required")
 
     structure = to_structure(atoms, cutoff, dtype=dtype)
-    structure["cell"] = effective_cell
+    # only periodic structures carry an effective cell; for non-PBC, keep
+    # to_structure's identity normalization (a raw zero cell would leak
+    # back in and is singular under inv() downstream)
+    if pbc.any():
+        structure["cell"] = effective_cell
 
     smearing, lr = to_lr(structure, lr_wavelength, smearing, halfspace=halfspace)
 

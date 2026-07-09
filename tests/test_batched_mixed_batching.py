@@ -343,7 +343,6 @@ def test_prepare_nonpbc_keeps_identity_cell():
 
     rng = np.random.default_rng(0)
     atoms = Atoms(numbers=[1] * 4, positions=rng.uniform(0, 3.0, (4, 3)), pbc=False)
-    atoms.set_initial_charges(np.array([1.0, -1.0, 1.0, -1.0]))
 
     structure = prepare(atoms, cutoff=4.0)
     np.testing.assert_array_equal(structure["cell"], np.eye(3))

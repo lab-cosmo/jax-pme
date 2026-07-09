@@ -330,3 +330,19 @@ def test_num_k_batching():
         nonzero = np.any(periodic_batch.k_grid[pbc_idx] != 0, axis=1).sum()
         assert nonzero >= num_k, f"structure {pbc_idx}: {nonzero} < {num_k}"
         assert nonzero < num_k * 2, f"structure {pbc_idx}: {nonzero} >> {num_k}"
+
+
+def test_prepare_nonpbc_keeps_identity_cell():
+    """prepare's effective-cell override must not clobber to_structure's
+    identity normalization for non-PBC structures with zero cells."""
+    import numpy as np
+
+    from ase import Atoms
+
+    from jaxpme.batched_mixed.batching import prepare
+
+    rng = np.random.default_rng(0)
+    atoms = Atoms(numbers=[1] * 4, positions=rng.uniform(0, 3.0, (4, 3)), pbc=False)
+
+    structure = prepare(atoms, cutoff=4.0)
+    np.testing.assert_array_equal(structure["cell"], np.eye(3))

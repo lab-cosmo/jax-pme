@@ -54,7 +54,33 @@ Periodic = namedtuple(
 )
 
 
-__all__ = ["Batch", "NonPeriodic", "Periodic", "get_batch", "prepare"]
+__all__ = ["Batch", "NonPeriodic", "Periodic", "get_batch", "prepare", "sample_shapes"]
+
+
+def sample_shapes(structure, BM=32):
+    """Per-sample size contributions to a `get_batch` call with tile size BM.
+
+    `get_batch`'s counting loop runs on this, so external batch-size planners
+    (accumulating samples against a budget) can rely on the same accounting.
+    Minimal valid batch sizes for a set of samples are the sums (`num_k`: max)
+    plus the reserve: +1 on `num_structures` / `num_atoms` / `num_pairs`
+    (padding structure, padding atom, guaranteed padding pair), +1 then
+    BM-rounded on `num_atoms_pbc` (i.e. exactly sum + BM), nothing on
+    `num_pairs_nonpbc` / `num_k` / `num_structures_pbc`. Note `next_size`
+    clamps its minimum to 1, so integer sizes must be >= 1 even where the
+    true need is 0.
+    """
+    lr = structure["lr"]
+    is_pbc = hasattr(lr, "k_grid")
+    n_atoms = len(structure["positions"])
+    return {
+        "n_atoms": n_atoms,
+        "n_pairs": len(structure["centers"]),
+        "is_pbc": is_pbc,
+        "n_atoms_pbc": int(np.ceil(n_atoms / BM) * BM) if is_pbc else 0,
+        "n_pairs_nonpbc": 0 if is_pbc else len(lr.centers),
+        "num_k": lr.k_grid.shape[0] if is_pbc else 0,
+    }
 
 
 def _build_dispatch_table(pbc_atom_off, n_kvec_tiles, BM):
@@ -100,6 +126,8 @@ def get_batch(
     num_k=None,
     BM=32,
     BK=128,
+    dtype=None,
+    int_dtype=int,
     strategy="powers_of_2",
 ):
     """Build a batch from `prepare`d samples.
@@ -107,13 +135,15 @@ def get_batch(
     BM, BK are tile sizes baked into the batch (Python ints). They drive both
     the per-system atom padding (`⌈N_b/BM⌉·BM`) and the K_pad alignment
     (multiple of BK). Production defaults: BM=32, BK=128.
+
+    `dtype` is the float dtype (default: inferred from `samples[0]`; required
+    explicit for `samples=[]`, which yields a pure-padding batch at the given
+    sizes). `int_dtype` is the dtype of the neighbor-list index arrays
+    (`centers`/`others`/`cell_shifts`/`*_to_structure`); the kernel-internal
+    flat-layout arrays stay int32 regardless. Per-sample accounting lives in
+    `sample_shapes` (incl. the size-reserve contract).
     """
-    _num_structures = len(samples)
-    _num_atoms = []
-    _num_pairs = []
-    _num_pairs_nonpbc = []
-    _is_pbc = []
-    _num_k = []
+    shapes = [sample_shapes(structure, BM=BM) for structure in samples]
 
     num_structures = num_structures if num_structures is not None else strategy
     num_structures_pbc = num_structures_pbc if num_structures_pbc is not None else strategy
@@ -123,28 +153,12 @@ def get_batch(
     num_pairs_nonpbc = num_pairs_nonpbc if num_pairs_nonpbc is not None else strategy
     num_k_strat = num_k if num_k is not None else strategy
 
-    for structure in samples:
-        lr = structure["lr"]
-        _num_atoms.append(len(structure["positions"]))
-        _num_pairs.append(len(structure["centers"]))
-        if hasattr(lr, "k_grid"):
-            _is_pbc.append(True)
-            _num_k.append(lr.k_grid.shape[0])
-        else:
-            _is_pbc.append(False)
-            _num_pairs_nonpbc.append(len(lr.centers))
-
-    _num_atoms = np.array(_num_atoms)
-    _num_pairs = np.array(_num_pairs)
-    _num_pairs_nonpbc = np.array(_num_pairs_nonpbc)
-    _is_pbc = np.array(_is_pbc)
-    _num_k = np.array(_num_k)
-
-    _total_atoms = int(_num_atoms.sum())
-    _total_pairs = int(_num_pairs.sum())
-    _max_k = int(_num_k.max()) if len(_num_k) > 0 else 0
-    _total_pairs_nonpbc = int(_num_pairs_nonpbc.sum()) if len(_num_pairs_nonpbc) > 0 else 0
-    _total_pbc = int(_is_pbc.sum())
+    _num_structures = len(samples)
+    _total_atoms = sum(s["n_atoms"] for s in shapes)
+    _total_pairs = sum(s["n_pairs"] for s in shapes)
+    _max_k = max((s["num_k"] for s in shapes), default=0)
+    _total_pairs_nonpbc = sum(s["n_pairs_nonpbc"] for s in shapes)
+    _total_pbc = sum(s["is_pbc"] for s in shapes)
 
     # outer sr_batch sizing (same scheme as batched_mixed)
     n_structures = next_size(_num_structures + 1, strategy=num_structures)
@@ -162,11 +176,7 @@ def get_batch(
     B_pbc_padded = max(1, next_size(_total_pbc, strategy=num_structures_pbc))
 
     # Per-pbc-system atom slots, padded to multiples of BM.
-    pbc_n_padded = []
-    for ip, structure in enumerate(samples):
-        if _is_pbc[ip]:
-            n = int(_num_atoms[ip])
-            pbc_n_padded.append(int(np.ceil(n / BM) * BM))
+    pbc_n_padded = [s["n_atoms_pbc"] for s in shapes if s["is_pbc"]]
     while len(pbc_n_padded) < B_pbc_padded:
         pbc_n_padded.append(0)
     N_pbc_total_min = int(sum(pbc_n_padded))
@@ -182,7 +192,10 @@ def get_batch(
 
     padding_atom_idx = _total_atoms
     padding_structure_idx = n_structures - 1
-    dtype = samples[0]["positions"].dtype
+    if dtype is None:
+        if not samples:
+            raise ValueError("empty `samples` requires an explicit `dtype`")
+        dtype = samples[0]["positions"].dtype
 
     # sr_batch arrays
     charges = np.zeros(n_atoms, dtype=dtype)
@@ -190,24 +203,26 @@ def get_batch(
     cell = np.zeros((n_structures, 3, 3), dtype=dtype)
     cell[:] = np.eye(3)
     smearing = np.ones(n_structures, dtype=dtype)
-    centers = np.full(n_pairs, padding_atom_idx, dtype=int)
-    others = np.full(n_pairs, padding_atom_idx, dtype=int)
-    cell_shifts = np.zeros((n_pairs, 3), dtype=int)
-    atom_to_structure = np.full(n_atoms, padding_structure_idx, dtype=int)
-    pair_to_structure = np.full(n_pairs, padding_structure_idx, dtype=int)
+    centers = np.full(n_pairs, padding_atom_idx, dtype=int_dtype)
+    others = np.full(n_pairs, padding_atom_idx, dtype=int_dtype)
+    cell_shifts = np.zeros((n_pairs, 3), dtype=int_dtype)
+    atom_to_structure = np.full(n_atoms, padding_structure_idx, dtype=int_dtype)
+    pair_to_structure = np.full(n_pairs, padding_structure_idx, dtype=int_dtype)
     structure_mask = np.zeros(n_structures, dtype=bool)
     pbc_mask = np.zeros(n_structures, dtype=bool)
     atom_mask = np.zeros(n_atoms, dtype=bool)
     pair_mask = np.zeros(n_pairs, dtype=bool)
 
     # nonperiodic
-    nonpbc_centers = np.full(n_pairs_nonpbc, padding_atom_idx, dtype=int)
-    nonpbc_others = np.full(n_pairs_nonpbc, padding_atom_idx, dtype=int)
+    nonpbc_centers = np.full(n_pairs_nonpbc, padding_atom_idx, dtype=int_dtype)
+    nonpbc_others = np.full(n_pairs_nonpbc, padding_atom_idx, dtype=int_dtype)
     nonpbc_pair_mask = np.zeros(n_pairs_nonpbc, dtype=bool)
 
     # periodic
     pbc_kgrid = np.zeros((B_pbc_padded, K_pad, 3), dtype=dtype)
-    pbc_structure_to_structure = np.full(B_pbc_padded, padding_structure_idx, dtype=int)
+    pbc_structure_to_structure = np.full(
+        B_pbc_padded, padding_structure_idx, dtype=int_dtype
+    )
     pbc_structure_mask = np.zeros(B_pbc_padded, dtype=bool)
     pbc_vectors = np.zeros((B_pbc_padded, 3), dtype=bool)
     pbc_segment_atom = np.zeros(N_pbc_total, dtype=np.int32)

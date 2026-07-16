@@ -161,6 +161,136 @@ def test_dispatch_table_exhaustive_coverage():
     )
 
 
+# ---------------------------------------------------------------------------
+# get_batch: empty samples, dtype threading, size-reserve contract
+# ---------------------------------------------------------------------------
+
+
+def _make_random_nonpbc(n, seed=0, box=3.0):
+    rng = np.random.default_rng(seed)
+    atoms = Atoms(numbers=[1] * n, positions=rng.uniform(0, box, (n, 3)), pbc=False)
+    atoms.set_initial_charges(np.zeros(n))
+    return atoms
+
+
+_TINY_SIZES = dict(
+    num_structures=2,
+    num_structures_pbc=1,
+    num_atoms=8,
+    num_atoms_pbc=32,
+    num_pairs=16,
+    num_pairs_nonpbc=4,
+    num_k=128,
+)
+
+
+def test_get_batch_empty_samples():
+    """`samples=[]` with explicit dtype yields a pure-padding batch: identity
+    cells, all-False masks, every atom mapped to the padding structure, and
+    padding pairs at atom row 0 (`padding_atom_idx = total_atoms = 0`) —
+    masked and position-zero either way, pinned so the convention is
+    deliberate. The batch must run through the kernel and yield exact zeros."""
+    from jaxpme.batched_tiled.batching import get_batch
+    from jaxpme.batched_tiled.calculators import Ewald
+
+    charges, sr, bnp, bp = get_batch([], dtype=np.float64, **_TINY_SIZES)
+
+    np.testing.assert_array_equal(sr.cell, np.broadcast_to(np.eye(3), sr.cell.shape))
+    for mask in (
+        sr.structure_mask,
+        sr.atom_mask,
+        sr.pair_mask,
+        sr.pbc_mask,
+        bnp.pair_mask,
+        bp.structure_mask,
+        bp.pbc_atom_mask,
+    ):
+        assert not mask.any()
+    np.testing.assert_array_equal(sr.atom_to_structure, _TINY_SIZES["num_structures"] - 1)
+    np.testing.assert_array_equal(sr.centers, 0)
+    np.testing.assert_array_equal(sr.others, 0)
+    np.testing.assert_array_equal(sr.smearing, 1.0)
+
+    e = np.array(Ewald(prefactor=1.0).energy(charges, sr, bnp, bp))
+    np.testing.assert_array_equal(e, 0.0)
+
+
+def test_get_batch_empty_samples_requires_dtype():
+    from jaxpme.batched_tiled.batching import get_batch
+
+    with pytest.raises(ValueError, match="dtype"):
+        get_batch([], **_TINY_SIZES)
+
+
+def test_get_batch_int_dtype():
+    """`int_dtype` sets the NL index arrays; the kernel-internal flat-layout
+    arrays stay int32 regardless; default is int64."""
+    from jaxpme.batched_tiled.batching import get_batch, prepare
+
+    structure = prepare(_make_random_pbc(4, seed=3), num_k=_NUM_K, cutoff=_CUTOFF)
+    sizes = {**_TINY_SIZES, "num_atoms_pbc": 64, "num_pairs": 512}
+
+    _, sr, bnp, bp = get_batch([structure], int_dtype=np.int32, **sizes)
+    for arr in (
+        sr.centers,
+        sr.others,
+        sr.cell_shifts,
+        sr.atom_to_structure,
+        sr.pair_to_structure,
+        bnp.centers,
+        bnp.others,
+        bp.structure_to_structure,
+    ):
+        assert arr.dtype == np.int32
+    for arr in (bp.pbc_atom_off, bp.pbc_segment_atom, bp.pbc_to_flat, bp.dispatch_table):
+        assert arr.dtype == np.int32
+
+    _, sr64, _, _ = get_batch([structure], **sizes)
+    assert sr64.centers.dtype == np.int64
+
+
+def test_get_batch_minimal_sizes_contract():
+    """The size-reserve contract (see `sample_shapes`): `get_batch` succeeds
+    at exactly the minimal sizes and rejects anything below each axis's assert
+    boundary. `next_size` clamps its minimum to 1, so reserve-0 axes bottom
+    out at max(need, 1). `num_atoms_pbc` is BM-rounded *up* after its assert:
+    its boundary is sum(padded) + 1, and anything in [sum+1, sum+BM] lands on
+    the same final sum + BM."""
+    from jaxpme.batched_tiled.batching import get_batch, prepare, sample_shapes
+
+    BM, BK = 8, 16
+    structures = [
+        prepare(_make_random_pbc(5, seed=1), num_k=_NUM_K, cutoff=_CUTOFF),
+        prepare(_make_random_nonpbc(3, seed=2), num_k=_NUM_K, cutoff=_CUTOFF),
+    ]
+    shapes = [sample_shapes(s, BM=BM) for s in structures]
+    pbc_padded_sum = sum(s["n_atoms_pbc"] for s in shapes)
+
+    # exact assert boundary per axis (the minimum that succeeds)
+    boundary = dict(
+        num_structures=len(structures) + 1,
+        num_structures_pbc=max(sum(s["is_pbc"] for s in shapes), 1),
+        num_atoms=sum(s["n_atoms"] for s in shapes) + 1,
+        num_atoms_pbc=pbc_padded_sum + 1,
+        num_pairs=sum(s["n_pairs"] for s in shapes) + 1,
+        num_pairs_nonpbc=max(sum(s["n_pairs_nonpbc"] for s in shapes), 1),
+        num_k=max(max(s["num_k"] for s in shapes), 1),
+    )
+
+    # minimal *final* sizes (what a size planner would request)
+    minimal = {**boundary, "num_atoms_pbc": pbc_padded_sum + BM}
+    get_batch(structures, BM=BM, BK=BK, **minimal)
+
+    # the boundary itself succeeds too; num_atoms_pbc BM-rounds to sum + BM
+    _, _, _, bp = get_batch(structures, BM=BM, BK=BK, **boundary)
+    assert bp.pbc_segment_atom.shape[0] == pbc_padded_sum + BM
+
+    for axis in boundary:
+        below = {**boundary, axis: boundary[axis] - 1}
+        with pytest.raises(AssertionError):
+            get_batch(structures, BM=BM, BK=BK, **below)
+
+
 def test_prepare_nonpbc_keeps_identity_cell():
     """to_structure normalizes zero non-PBC cells to the identity; prepare's
     effective-cell override must not leak the raw zeros back in (singular

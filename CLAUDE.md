@@ -58,6 +58,7 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
 - `correction_pbc` in `potentials.py` projects onto the plane normal via cross product
 - `shrink_2d_cell` in `batching.py` reduces the non-periodic cell vector before deriving Ewald parameters, preventing large vacuum from inflating the k-grid
 - Vacuum gap formula: `h_min = thickness + 1.5 * L_max` (residual ≈ exp(-3π) ≈ 7e-5)
+- Raw/effective cell split (both batched families): `prepare` keeps `structure["cell"]` raw and stores the shrunk cell in `structure["effective_cell"]`; `Batch` carries both plus `Batch.pbc` [S, 3] (periodic rows), with `None` defaults meaning "cell is already effective". Calculators compose once at entry (`jaxpme.utils.compose_cell`): the Ewald math sees effective values, cell-gradients reach `Batch.cell` through periodic rows only — the shrink's cell-gradient is an artifact and is dropped (2D-slab stress changed accordingly)
 
 ## Testing
 Run from the package root: `python -m pytest tests/ -v`

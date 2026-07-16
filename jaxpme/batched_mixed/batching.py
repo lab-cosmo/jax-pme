@@ -12,7 +12,7 @@ Batch = namedtuple(
         "others",
         "cell_shifts",
         "distances",
-        "cell",
+        "cell",  # raw data cell [S, 3, 3]
         "smearing",
         "atom_mask",
         "pair_mask",
@@ -20,7 +20,14 @@ Batch = namedtuple(
         "pbc_mask",
         "atom_to_structure",
         "pair_to_structure",
+        # the cell the Ewald math consumes [S, 3, 3] (2D pbc: vacuum vector
+        # shrunk by `prepare`) + which lattice vectors are periodic [S, 3].
+        # None means "cell is already effective" — calculators compose via
+        # `jaxpme.utils.compose_cell` at entry.
+        "effective_cell",
+        "pbc",
     ),
+    defaults=(None, None),
 )
 Periodic = namedtuple(
     "Periodic",
@@ -109,6 +116,8 @@ def get_batch(
     positions = np.zeros((num_atoms, 3), dtype=dtype)
     cell = np.zeros((num_structures, 3, 3), dtype=dtype)
     cell[:] = np.eye(3)
+    effective_cell = cell.copy()
+    pbc_rows = np.zeros((num_structures, 3), dtype=bool)
     smearing = np.ones(num_structures, dtype=dtype)
     centers = np.ones(num_pairs, dtype=int) * padding_atom_idx
     others = np.ones(num_pairs, dtype=int) * padding_atom_idx
@@ -149,6 +158,8 @@ def get_batch(
         charges[atom_slice] = structure["charges"]
         positions[atom_slice] = structure["positions"]
         cell[idx] = structure["cell"]
+        effective_cell[idx] = structure.get("effective_cell", structure["cell"])
+        pbc_rows[idx] = structure["pbc"]
         centers[pair_slice] = structure["centers"] + atom_offset
         others[pair_slice] = structure["others"] + atom_offset
         cell_shifts[pair_slice] = structure["cell_shifts"]
@@ -189,6 +200,8 @@ def get_batch(
     sr_batch = Batch(
         positions=positions,
         cell=cell,
+        effective_cell=effective_cell,
+        pbc=pbc_rows,
         smearing=smearing,
         centers=centers,
         others=others,
@@ -260,9 +273,14 @@ def prepare(
         raise ValueError("one of cutoff or num_k is required")
 
     structure = to_structure(atoms, cutoff, dtype=dtype)
-    # keep to_structure's identity cell for non-PBC (zero cells are singular under inv())
+    # `structure["cell"]` stays the raw data cell (identity-normalized for
+    # non-PBC by to_structure); the possibly-shrunk cell the Ewald math
+    # consumes travels alongside, and `to_lr` / the calculators read it from
+    # there. Gradients to the raw cell flow through periodic rows only — the
+    # 2D shrink is a position-dependent convergence trick whose cell-gradient
+    # is an artifact (see `jaxpme.utils.compose_cell`).
     if pbc.any():
-        structure["cell"] = effective_cell
+        structure["effective_cell"] = effective_cell
 
     smearing, lr = to_lr(structure, lr_wavelength, smearing, halfspace=halfspace)
 
@@ -306,7 +324,10 @@ def to_lr(structure, lr_wavelength, smearing, halfspace=True):
     pbc = structure["pbc"]
 
     if pbc.sum() in [2, 3]:
-        ns = np.ceil(np.linalg.norm(structure["cell"], axis=-1) / lr_wavelength)
+        # the k-grid must be sized on the effective cell — for 2D pbc the raw
+        # vacuum vector would explode it
+        k_cell = structure.get("effective_cell", structure["cell"])
+        ns = np.ceil(np.linalg.norm(k_cell, axis=-1) / lr_wavelength)
         shape = (int(ns[0]), int(ns[1]), int(ns[2]))
         k_grid = generate_ewald_k_grid(shape, halfspace=halfspace)
         return smearing, Periodic(

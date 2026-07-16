@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jaxpme.calculators import Calculator
 from jaxpme.kspace import get_reciprocal
 from jaxpme.potentials import potential
-from jaxpme.utils import get_distances, get_volume, safe_norm
+from jaxpme.utils import compose_cell, get_distances, get_volume, safe_norm
 
 from .kspace import generate_ewald_kvectors
 
@@ -30,6 +30,10 @@ def Ewald(
         batch_nopbc,
         batch_pbc,
     ):
+        # single composition point: everything downstream sees the effective
+        # cell, cell-gradients flow to the raw `batch.cell` through periodic
+        # rows only (see `compose_cell`)
+        batch = batch._replace(cell=compose_cell(batch))
         N_all = charges.shape[0]
 
         pbc_mask = batch.pbc_mask[batch.atom_to_structure]

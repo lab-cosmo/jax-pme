@@ -291,10 +291,118 @@ def test_get_batch_minimal_sizes_contract():
             get_batch(structures, BM=BM, BK=BK, **below)
 
 
+def _make_slab(n=6, L=6.0, vacuum=40.0, seed=5):
+    """2D slab with enough vacuum that `shrink_2d_cell` actually shrinks."""
+    rng = np.random.default_rng(seed)
+    pos = rng.uniform(0, L, (n, 3))
+    pos[:, 2] = rng.uniform(0, 2.0, n)
+    q = rng.choice([-1.0, 1.0], size=n).astype(np.float64)
+    q[-1] = -q[:-1].sum()
+    atoms = Atoms(
+        numbers=[1] * n,
+        positions=pos,
+        cell=np.diag([L, L, vacuum]),
+        pbc=[True, True, False],
+    )
+    atoms.set_initial_charges(q)
+    return atoms
+
+
+def test_prepare_2d_keeps_raw_cell_stores_effective():
+    """For 2D pbc, `prepare` keeps `structure["cell"]` raw and stores the
+    shrunk cell in `structure["effective_cell"]` instead of overwriting."""
+    from jaxpme.batched_tiled.batching import prepare
+
+    atoms = _make_slab()
+    structure = prepare(atoms, num_k=_NUM_K, cutoff=_CUTOFF)
+
+    np.testing.assert_array_equal(structure["cell"], atoms.get_cell().array)
+    eff = structure["effective_cell"]
+    np.testing.assert_array_equal(eff[:2], structure["cell"][:2])
+    assert np.linalg.norm(eff[2]) < np.linalg.norm(structure["cell"][2])
+
+
+def test_get_batch_cell_split_and_pbc_rows():
+    """`Batch.cell` is raw, `Batch.effective_cell` is what the Ewald math
+    consumes, `Batch.pbc` are the per-structure periodic rows; padding
+    structures carry identity cells and all-False rows."""
+    from jaxpme.batched_tiled.batching import get_batch, prepare
+
+    structures = [
+        prepare(_make_random_pbc(4, seed=1), num_k=_NUM_K, cutoff=_CUTOFF),
+        prepare(_make_slab(), num_k=_NUM_K, cutoff=_CUTOFF),
+        prepare(_make_random_nonpbc(3, seed=2), num_k=_NUM_K, cutoff=_CUTOFF),
+    ]
+    _, sr, _, _ = get_batch(
+        structures,
+        num_structures=4,
+        num_structures_pbc=2,
+        num_atoms=16,
+        num_atoms_pbc=96,
+        num_pairs=2048,
+        num_pairs_nonpbc=8,
+        num_k=1024,
+    )
+
+    for idx, s in enumerate(structures):
+        np.testing.assert_array_equal(sr.cell[idx], s["cell"])
+        np.testing.assert_array_equal(
+            sr.effective_cell[idx], s.get("effective_cell", s["cell"])
+        )
+        np.testing.assert_array_equal(sr.pbc[idx], s["pbc"])
+    assert (sr.effective_cell[1] != sr.cell[1]).any()  # the slab actually shrunk
+    np.testing.assert_array_equal(sr.cell[3], np.eye(3))
+    np.testing.assert_array_equal(sr.effective_cell[3], np.eye(3))
+    assert not sr.pbc[3].any()
+
+
+def test_2d_cell_gradient_drops_shrink_artifact():
+    """Gradients to the raw `Batch.cell` flow through periodic rows only:
+    the 2D shrink is a convergence trick whose cell-gradient is an artifact,
+    dropped inside `compose_cell`. The vacuum row's gradient is exactly zero;
+    the periodic rows' are not."""
+    from jaxpme.batched_tiled.calculators import Ewald
+
+    calc = Ewald(prefactor=1.0)
+    charges, sr, bnp, bp = calc.prepare([_make_slab()], num_k=_NUM_K, cutoff=_CUTOFF)
+
+    def total_energy(cell):
+        return calc.energy(charges, sr._replace(cell=cell), bnp, bp).sum()
+
+    g = np.array(jax.grad(total_energy)(sr.cell))[0]
+    np.testing.assert_array_equal(g[2], 0.0)
+    assert np.abs(g[:2]).max() > 0.0
+
+
+def test_compose_cell_none_passthrough():
+    """`effective_cell=None` (legacy / hand-built batches) means the cell is
+    already effective — `compose_cell` returns it untouched."""
+    from jaxpme.batched_tiled.batching import Batch
+    from jaxpme.utils import compose_cell
+
+    cell = np.arange(9.0).reshape(1, 3, 3)
+    batch = Batch(
+        positions=None,
+        centers=None,
+        others=None,
+        cell_shifts=None,
+        distances=None,
+        cell=cell,
+        smearing=None,
+        atom_mask=None,
+        pair_mask=None,
+        structure_mask=None,
+        pbc_mask=None,
+        atom_to_structure=None,
+        pair_to_structure=None,
+    )
+    assert compose_cell(batch) is cell
+
+
 def test_prepare_nonpbc_keeps_identity_cell():
-    """to_structure normalizes zero non-PBC cells to the identity; prepare's
-    effective-cell override must not leak the raw zeros back in (singular
-    under inv() downstream, e.g. for cells indexed by padding pbc rows)."""
+    """to_structure normalizes zero non-PBC cells to the identity; `prepare`
+    must keep that (a raw zero cell is singular under inv() downstream, e.g.
+    for cells indexed by padding pbc rows)."""
     from jaxpme.batched_tiled.batching import get_batch, prepare
 
     rng = np.random.default_rng(0)

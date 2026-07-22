@@ -118,7 +118,7 @@ from jaxpme.batched_tiled import Ewald   # per-system sum-padding + tile dispatc
 from jaxpme.batched_flat import Ewald    # alternative flat padding strategy
 ```
 
-All three accept lists of `ase.Atoms` in `prepare` and handle padding/masking internally. Currently, only batched `Ewald` is implemented. 2D PBC (slab geometries) is supported for arbitrary triclinic cells; large vacuum gaps are automatically shrunk to keep the k-grid efficient.
+All three accept lists of `ase.Atoms` in `prepare` and handle padding/masking internally. Currently, only batched `Ewald` is implemented. 2D PBC (slab geometries) is supported for arbitrary triclinic cells; large vacuum gaps are automatically shrunk to keep the k-grid efficient. The shrunk cell travels separately from the raw `Batch.cell` and the calculators compose the two at entry — see `jaxpme.utils.compose_cell` for the mechanism and gradient policy (2D-slab stress no longer includes the shrink's artifact gradient).
 
 `batched_tiled` is a second Ewald backend designed for heterogeneous batches: atoms are **sum-padded per system** (each system padded to `⌈N_b/BM⌉·BM` atoms, concatenated into one flat array) rather than max-padded to the batch's largest system. The reciprocal sum runs through a pure-JAX tile-dispatched kernel over fixed-size `(BM × BK)` work tiles — `vmap + segment_sum` for pass 1's structure factors, `vmap + reshape-sum` for pass 2's per-atom potential. Differentiates cleanly through autograd, including stress, with no `custom_vjp`. Trade-offs vs `batched_mixed`:
 

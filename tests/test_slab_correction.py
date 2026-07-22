@@ -375,10 +375,11 @@ def test_cell_shrink_large_vacuum():
     atoms = _make_slab_atoms(cell, positions, [1.0, -1.0], [True, True, False])
     structure = prepare(atoms, cutoff=cutoff)
 
-    # Cell should be shrunk: h_min = 3 + 1.5*10 = 18
-    h_shrunk = abs(structure["cell"][2, 2])
-    assert h_shrunk < 100.0, "cell should have been shrunk"
-    assert h_shrunk >= 18.0 - 0.01, "cell should be at least h_min"
+    # raw cell stays; the shrunk cell travels alongside: h_min = 3 + 1.5*10 = 18
+    assert abs(structure["cell"][2, 2]) == 100.0
+    h_shrunk = abs(structure["effective_cell"][2, 2])
+    assert h_shrunk < 100.0, "effective cell should have been shrunk"
+    assert h_shrunk >= 18.0 - 0.01, "effective cell should be at least h_min"
 
     # k-grid should be much smaller than with original cell
     lr_wavelength = cutoff / 8.0
@@ -401,7 +402,7 @@ def test_cell_shrink_nonorthorhombic():
 
     # Normal is z-hat for this cell, thickness = 5
     # L_max = ||[10,3,0]|| ≈ 10.44, h_min = 5 + 1.5*10.44 ≈ 20.66
-    h_shrunk = np.linalg.norm(structure["cell"][2])
+    h_shrunk = np.linalg.norm(structure["effective_cell"][2])
     assert h_shrunk < 80.0
     assert h_shrunk >= 20.0 - 0.01
 
@@ -470,8 +471,9 @@ def test_num_k_with_large_vacuum():
     # With shrunk cell (~9 Å), lr_wavelength and cutoff are much smaller
     structure = prepare(atoms, num_k=200)
 
-    # Cell should be shrunk
-    assert abs(structure["cell"][2, 2]) < 100.0
+    # raw cell stays; the effective cell is shrunk
+    assert abs(structure["cell"][2, 2]) == 100.0
+    assert abs(structure["effective_cell"][2, 2]) < 100.0
 
     # The derived smearing should be reasonable (not inflated by vacuum)
     assert structure["smearing"] < 5.0  # would be ~7.4 without shrinking

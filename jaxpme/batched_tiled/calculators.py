@@ -18,7 +18,7 @@ from jaxpme.kspace import (
     slab_geometry,
 )
 from jaxpme.potentials import potential
-from jaxpme.utils import get_distances, get_volume, safe_norm
+from jaxpme.utils import compose_cell, get_distances, get_volume, safe_norm
 
 from .kernel import phi_recip_xla_vmap
 from .kspace import generate_ewald_kvectors
@@ -185,6 +185,7 @@ def Ewald(
         return (phi_full + corr) / 2
 
     def potentials_fn(charges, batch, batch_nopbc, batch_pbc):
+        batch = batch._replace(cell=compose_cell(batch))
         N_all = charges.shape[0]
         pbc_mask_atom = batch.pbc_mask[batch.atom_to_structure]
         charges = charges * batch.atom_mask

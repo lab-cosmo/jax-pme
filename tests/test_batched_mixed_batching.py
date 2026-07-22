@@ -333,8 +333,8 @@ def test_num_k_batching():
 
 
 def test_prepare_nonpbc_keeps_identity_cell():
-    """prepare's effective-cell override must not clobber to_structure's
-    identity normalization for non-PBC structures with zero cells."""
+    """prepare must keep to_structure's identity normalization for non-PBC
+    structures with zero cells."""
     import numpy as np
 
     from ase import Atoms
@@ -346,3 +346,36 @@ def test_prepare_nonpbc_keeps_identity_cell():
 
     structure = prepare(atoms, cutoff=4.0)
     np.testing.assert_array_equal(structure["cell"], np.eye(3))
+
+
+def test_prepare_2d_keeps_raw_cell_stores_effective():
+    """2D prepare: cell stays raw, effective_cell holds the shrink;
+    get_batch carries both + pbc rows."""
+    import numpy as np
+
+    from ase import Atoms
+
+    from jaxpme.batched_mixed.batching import get_batch, prepare
+
+    rng = np.random.default_rng(3)
+    n, L, vacuum = 6, 6.0, 40.0
+    pos = rng.uniform(0, L, (n, 3))
+    pos[:, 2] = rng.uniform(0, 2.0, n)
+    atoms = Atoms(
+        numbers=[1] * n,
+        positions=pos,
+        cell=np.diag([L, L, vacuum]),
+        pbc=[True, True, False],
+    )
+    atoms.set_initial_charges(np.zeros(n))
+
+    structure = prepare(atoms, num_k=100)
+    np.testing.assert_array_equal(structure["cell"], atoms.get_cell().array)
+    eff = structure["effective_cell"]
+    np.testing.assert_array_equal(eff[:2], structure["cell"][:2])
+    assert np.linalg.norm(eff[2]) < np.linalg.norm(structure["cell"][2])
+
+    _, sr, _, _ = get_batch([structure])
+    np.testing.assert_array_equal(sr.cell[0], structure["cell"])
+    np.testing.assert_array_equal(sr.effective_cell[0], eff)
+    np.testing.assert_array_equal(sr.pbc[0], [True, True, False])

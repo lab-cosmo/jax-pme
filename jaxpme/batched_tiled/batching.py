@@ -202,6 +202,8 @@ def get_batch(
     positions = np.zeros((n_atoms, 3), dtype=dtype)
     cell = np.zeros((n_structures, 3, 3), dtype=dtype)
     cell[:] = np.eye(3)
+    effective_cell = cell.copy()
+    pbc_rows = np.zeros((n_structures, 3), dtype=bool)
     smearing = np.ones(n_structures, dtype=dtype)
     centers = np.full(n_pairs, padding_atom_idx, dtype=int_dtype)
     others = np.full(n_pairs, padding_atom_idx, dtype=int_dtype)
@@ -250,6 +252,8 @@ def get_batch(
         charges[atom_slice] = structure["charges"]
         positions[atom_slice] = structure["positions"]
         cell[idx] = structure["cell"]
+        effective_cell[idx] = structure.get("effective_cell", structure["cell"])
+        pbc_rows[idx] = structure["pbc"]
         centers[pair_slice] = structure["centers"] + atom_offset
         others[pair_slice] = structure["others"] + atom_offset
         cell_shifts[pair_slice] = structure["cell_shifts"]
@@ -293,6 +297,8 @@ def get_batch(
     sr_batch = Batch(
         positions=positions,
         cell=cell,
+        effective_cell=effective_cell,
+        pbc=pbc_rows,
         smearing=smearing,
         centers=centers,
         others=others,
@@ -372,9 +378,9 @@ def prepare(atoms, num_k, cutoff=None, smearing=None, halfspace=True, dtype=np.f
         # Skip it (cutoff=None -> empty list) instead of carrying dead pairs.
         lr_wavelength = None
         structure = to_structure(atoms, cutoff=None, dtype=dtype)
-    # keep to_structure's identity cell for non-PBC (zero cells are singular under inv())
+    # see jaxpme.utils.compose_cell
     if pbc.any():
-        structure["cell"] = effective_cell
+        structure["effective_cell"] = effective_cell
 
     smearing_out, lr = to_lr(structure, lr_wavelength, smearing, halfspace=halfspace)
 

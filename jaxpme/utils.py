@@ -21,17 +21,16 @@ def atoms_to_graph(atoms, cutoff, full_list=False):
 
 
 def compose_cell(batch):
-    """The cell the Ewald math consumes, from a batched `Batch`.
+    """The cell the Ewald math consumes. THE explanation of the cell split:
 
-    For 2D pbc, `prepare` shrinks the non-periodic cell vector (a
-    position-dependent convergence trick) and stores the result in
-    `batch.effective_cell`, keeping `batch.cell` raw. Compose row-wise:
-    effective values everywhere, but gradients to `batch.cell` flow through
-    periodic rows only — the shrink's cell-gradient is an artifact of the
-    trick, not physics, and is deliberately dropped. Row selection is in
-    lattice-vector space, so oblique cells need no special handling.
-    `effective_cell=None` means the cell is already effective (legacy or
-    hand-built batches).
+    `batch.cell` is the raw data cell; `batch.effective_cell` is the cell
+    the math needs (for 2D pbc, `prepare` shrinks the vacuum vector — a
+    position-dependent convergence trick). `batch.pbc` [S, 3] is the mask
+    that picks per lattice vector: True -> raw, False -> effective. The two
+    agree on periodic rows, so the values are effective everywhere while
+    gradients (stress) reach `batch.cell` through periodic rows only — the
+    shrink's cell-gradient is an artifact and is deliberately dropped.
+    `effective_cell=None`: `cell` is already effective, pass through.
     """
     if batch.effective_cell is None:
         return batch.cell

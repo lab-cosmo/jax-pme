@@ -323,9 +323,8 @@ def test_prepare_2d_keeps_raw_cell_stores_effective():
 
 
 def test_get_batch_cell_split_and_pbc_rows():
-    """`Batch.cell` is raw, `Batch.effective_cell` is what the Ewald math
-    consumes, `Batch.pbc` are the per-structure periodic rows; padding
-    structures carry identity cells and all-False rows."""
+    """Batch carries cell (raw) / effective_cell / pbc per structure;
+    padding rows are identity + all-False."""
     from jaxpme.batched_tiled.batching import get_batch, prepare
 
     structures = [
@@ -357,10 +356,8 @@ def test_get_batch_cell_split_and_pbc_rows():
 
 
 def test_2d_cell_gradient_drops_shrink_artifact():
-    """Gradients to the raw `Batch.cell` flow through periodic rows only:
-    the 2D shrink is a convergence trick whose cell-gradient is an artifact,
-    dropped inside `compose_cell`. The vacuum row's gradient is exactly zero;
-    the periodic rows' are not."""
+    """compose_cell's gradient policy: the vacuum row of dE/d(Batch.cell) is
+    exactly zero, the periodic rows are not."""
     from jaxpme.batched_tiled.calculators import Ewald
 
     calc = Ewald(prefactor=1.0)
@@ -375,8 +372,7 @@ def test_2d_cell_gradient_drops_shrink_artifact():
 
 
 def test_compose_cell_none_passthrough():
-    """`effective_cell=None` (legacy / hand-built batches) means the cell is
-    already effective — `compose_cell` returns it untouched."""
+    """effective_cell=None -> compose_cell returns the cell untouched."""
     from jaxpme.batched_tiled.batching import Batch
     from jaxpme.utils import compose_cell
 

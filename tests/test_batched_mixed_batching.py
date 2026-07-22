@@ -349,9 +349,8 @@ def test_prepare_nonpbc_keeps_identity_cell():
 
 
 def test_prepare_2d_keeps_raw_cell_stores_effective():
-    """For 2D pbc, `prepare` keeps `structure["cell"]` raw and stores the
-    shrunk cell in `structure["effective_cell"]`; `get_batch` carries both
-    plus the periodic rows on the `Batch`."""
+    """2D prepare: cell stays raw, effective_cell holds the shrink;
+    get_batch carries both + pbc rows."""
     import numpy as np
 
     from ase import Atoms

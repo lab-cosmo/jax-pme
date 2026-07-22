@@ -378,9 +378,7 @@ def prepare(atoms, num_k, cutoff=None, smearing=None, halfspace=True, dtype=np.f
         # Skip it (cutoff=None -> empty list) instead of carrying dead pairs.
         lr_wavelength = None
         structure = to_structure(atoms, cutoff=None, dtype=dtype)
-    # `structure["cell"]` stays the raw data cell (identity-normalized for
-    # non-PBC by to_structure); the possibly-shrunk cell the Ewald math
-    # consumes travels alongside (see `batched_mixed.prepare`)
+    # cell stays raw; the shrunk cell travels alongside (jaxpme.utils.compose_cell)
     if pbc.any():
         structure["effective_cell"] = effective_cell
 

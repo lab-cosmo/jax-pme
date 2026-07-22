@@ -20,12 +20,8 @@ Batch = namedtuple(
         "pbc_mask",
         "atom_to_structure",
         "pair_to_structure",
-        # the cell the Ewald math consumes [S, 3, 3] (2D pbc: vacuum vector
-        # shrunk by `prepare`) + which lattice vectors are periodic [S, 3].
-        # None means "cell is already effective" — calculators compose via
-        # `jaxpme.utils.compose_cell` at entry.
-        "effective_cell",
-        "pbc",
+        "effective_cell",  # [S, 3, 3] + row mask below; see jaxpme.utils.compose_cell
+        "pbc",  # [S, 3]
     ),
     defaults=(None, None),
 )
@@ -273,12 +269,7 @@ def prepare(
         raise ValueError("one of cutoff or num_k is required")
 
     structure = to_structure(atoms, cutoff, dtype=dtype)
-    # `structure["cell"]` stays the raw data cell (identity-normalized for
-    # non-PBC by to_structure); the possibly-shrunk cell the Ewald math
-    # consumes travels alongside, and `to_lr` / the calculators read it from
-    # there. Gradients to the raw cell flow through periodic rows only — the
-    # 2D shrink is a position-dependent convergence trick whose cell-gradient
-    # is an artifact (see `jaxpme.utils.compose_cell`).
+    # cell stays raw; the shrunk cell travels alongside (jaxpme.utils.compose_cell)
     if pbc.any():
         structure["effective_cell"] = effective_cell
 
@@ -324,8 +315,7 @@ def to_lr(structure, lr_wavelength, smearing, halfspace=True):
     pbc = structure["pbc"]
 
     if pbc.sum() in [2, 3]:
-        # the k-grid must be sized on the effective cell — for 2D pbc the raw
-        # vacuum vector would explode it
+        # size the k-grid on the effective cell (a raw 2D vacuum vector would explode it)
         k_cell = structure.get("effective_cell", structure["cell"])
         ns = np.ceil(np.linalg.norm(k_cell, axis=-1) / lr_wavelength)
         shape = (int(ns[0]), int(ns[1]), int(ns[2]))

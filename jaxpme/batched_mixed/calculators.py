@@ -30,9 +30,7 @@ def Ewald(
         batch_nopbc,
         batch_pbc,
     ):
-        # single composition point: everything downstream sees the effective
-        # cell, cell-gradients flow to the raw `batch.cell` through periodic
-        # rows only (see `compose_cell`)
+        # single composition point for the raw/effective cell split (compose_cell)
         batch = batch._replace(cell=compose_cell(batch))
         N_all = charges.shape[0]
 

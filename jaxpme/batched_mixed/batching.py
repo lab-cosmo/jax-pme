@@ -12,7 +12,7 @@ Batch = namedtuple(
         "others",
         "cell_shifts",
         "distances",
-        "cell",  # raw data cell [S, 3, 3]
+        "cell",
         "smearing",
         "atom_mask",
         "pair_mask",
@@ -20,8 +20,8 @@ Batch = namedtuple(
         "pbc_mask",
         "atom_to_structure",
         "pair_to_structure",
-        "effective_cell",  # [S, 3, 3] + row mask below; see jaxpme.utils.compose_cell
-        "pbc",  # [S, 3]
+        "effective_cell",  # see jaxpme.utils.compose_cell
+        "pbc",
     ),
     defaults=(None, None),
 )
@@ -269,7 +269,7 @@ def prepare(
         raise ValueError("one of cutoff or num_k is required")
 
     structure = to_structure(atoms, cutoff, dtype=dtype)
-    # cell stays raw; the shrunk cell travels alongside (jaxpme.utils.compose_cell)
+    # see jaxpme.utils.compose_cell
     if pbc.any():
         structure["effective_cell"] = effective_cell
 
@@ -315,7 +315,7 @@ def to_lr(structure, lr_wavelength, smearing, halfspace=True):
     pbc = structure["pbc"]
 
     if pbc.sum() in [2, 3]:
-        # size the k-grid on the effective cell (a raw 2D vacuum vector would explode it)
+        # size the k-grid on the effective cell
         k_cell = structure.get("effective_cell", structure["cell"])
         ns = np.ceil(np.linalg.norm(k_cell, axis=-1) / lr_wavelength)
         shape = (int(ns[0]), int(ns[1]), int(ns[2]))

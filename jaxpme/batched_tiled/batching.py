@@ -378,7 +378,7 @@ def prepare(atoms, num_k, cutoff=None, smearing=None, halfspace=True, dtype=np.f
         # Skip it (cutoff=None -> empty list) instead of carrying dead pairs.
         lr_wavelength = None
         structure = to_structure(atoms, cutoff=None, dtype=dtype)
-    # cell stays raw; the shrunk cell travels alongside (jaxpme.utils.compose_cell)
+    # see jaxpme.utils.compose_cell
     if pbc.any():
         structure["effective_cell"] = effective_cell
 

@@ -292,7 +292,7 @@ def test_get_batch_minimal_sizes_contract():
 
 
 def _make_slab(n=6, L=6.0, vacuum=40.0, seed=5):
-    """2D slab with enough vacuum that `shrink_2d_cell` actually shrinks."""
+    """2D slab with enough vacuum that shrink_2d_cell actually shrinks."""
     rng = np.random.default_rng(seed)
     pos = rng.uniform(0, L, (n, 3))
     pos[:, 2] = rng.uniform(0, 2.0, n)
@@ -309,8 +309,7 @@ def _make_slab(n=6, L=6.0, vacuum=40.0, seed=5):
 
 
 def test_prepare_2d_keeps_raw_cell_stores_effective():
-    """For 2D pbc, `prepare` keeps `structure["cell"]` raw and stores the
-    shrunk cell in `structure["effective_cell"]` instead of overwriting."""
+    """2D prepare: cell stays raw, effective_cell holds the shrink."""
     from jaxpme.batched_tiled.batching import prepare
 
     atoms = _make_slab()
@@ -396,9 +395,8 @@ def test_compose_cell_none_passthrough():
 
 
 def test_prepare_nonpbc_keeps_identity_cell():
-    """to_structure normalizes zero non-PBC cells to the identity; `prepare`
-    must keep that (a raw zero cell is singular under inv() downstream, e.g.
-    for cells indexed by padding pbc rows)."""
+    """to_structure normalizes zero non-PBC cells to the identity; prepare
+    must keep that (a raw zero cell is singular under inv() downstream)."""
     from jaxpme.batched_tiled.batching import get_batch, prepare
 
     rng = np.random.default_rng(0)

@@ -185,7 +185,6 @@ def Ewald(
         return (phi_full + corr) / 2
 
     def potentials_fn(charges, batch, batch_nopbc, batch_pbc):
-        # single composition point for the raw/effective cell split (compose_cell)
         batch = batch._replace(cell=compose_cell(batch))
         N_all = charges.shape[0]
         pbc_mask_atom = batch.pbc_mask[batch.atom_to_structure]

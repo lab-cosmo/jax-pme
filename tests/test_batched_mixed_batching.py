@@ -333,7 +333,7 @@ def test_num_k_batching():
 
 
 def test_prepare_nonpbc_keeps_identity_cell():
-    """`prepare` must keep to_structure's identity normalization for non-PBC
+    """prepare must keep to_structure's identity normalization for non-PBC
     structures with zero cells."""
     import numpy as np
 

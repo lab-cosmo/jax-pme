@@ -21,7 +21,7 @@ def atoms_to_graph(atoms, cutoff, full_list=False):
 
 
 def compose_cell(batch):
-    """The cell the Ewald math consumes. THE explanation of the cell split:
+    """The cell the Ewald math consumes.
 
     `batch.cell` is the raw data cell; `batch.effective_cell` is the cell
     the math needs (for 2D pbc, `prepare` shrinks the vacuum vector — a

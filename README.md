@@ -125,6 +125,7 @@ All three accept lists of `ase.Atoms` in `prepare` and handle padding/masking in
 - **`num_k` is required** on `prepare` and fixes the reciprocal grid (per-cell K target via `lr_wavelength_for_num_k`; the K axis stays rectangular so all systems share `K_pad`). The real-space `cutoff` follows it: omit it and it is derived as `lr_wavelength · 8` (with `smearing = lr_wavelength · 2`), matching `batched_mixed`, so real and reciprocal space stay balanced. An explicit `cutoff` overrides only the real-space radius (`smearing` still tracks `num_k`).
 - **Tile sizes `(BM, BK)` are fixed at prepare time** (defaults `BM=32, BK=128`). They drive both the per-system atom padding and the kernel tile dimensions.
 - Lower memory and faster on heterogeneous batches where system sizes vary by a lot (small molecules + larger crystals/MOFs in the same batch).
+- **Host-side batching is exposed for external pipelines**: `batched_tiled.batching.sample_shapes` gives the per-sample size accounting `get_batch` itself uses (for batch-size planners), and `get_batch(samples=[], dtype=...)` builds a pure-padding batch at explicit sizes; `int_dtype=` sets the neighbor-list index dtype (default int64).
 
 ## Development
 

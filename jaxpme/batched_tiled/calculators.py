@@ -81,7 +81,16 @@ def Ewald(
         kvec = jax.vmap(generate_ewald_kvectors)(reciprocal_cell, batch_pbc.k_grid)
         k2 = (kvec**2).sum(axis=-1)
         G = jax.vmap(pot.lr)(smearing_pbc, k2)
-        W = G * g_factor / volume_pbc[:, None]
+        # Every k=0 row is masked out here and the k=0 term is added back once
+        # per system in `kspace_fn` -- mirrors `solvers.ewald.kspace`. Three
+        # kinds of row land on k2 == 0: the real k=0 vector (full-space grids
+        # only), the padding rows of a real system's k-axis, and whole padding
+        # systems. For p <= 3 `pot.lr(s, 0)` is 0 and this is a no-op; for
+        # p > 3 it is finite, so without the mask every padding row would
+        # inject a spurious `lr_k0 · Σq`.
+        W = jnp.where(k2 == 0.0, 0.0, G * g_factor) / volume_pbc[:, None]
+        # per-system k->0 limit, applied once (no g_factor: k=0 has no -k partner)
+        k0_pbc = jax.vmap(pot.lr)(smearing_pbc, jnp.zeros_like(smearing_pbc))
 
         # BM/BK survive the prefetch / device_put pipeline as dummy-array
         # shape metadata (see `batched_tiled.batching.get_batch`). Reading
@@ -94,6 +103,7 @@ def Ewald(
         return (
             kvec,
             W,
+            k0_pbc,
             cell_pbc,
             volume_pbc,
             smearing_pbc,
@@ -152,6 +162,7 @@ def Ewald(
         (
             kvec,
             W,
+            k0_pbc,
             cell_pbc,
             volume_pbc,
             smearing_pbc,
@@ -178,6 +189,16 @@ def Ewald(
             n_kvec_tiles=n_kvec_tiles,
         )
         phi_pbc = phi_pbc * batch_pbc.pbc_atom_mask
+
+        # k=0 term, masked out of W above and added back exactly once: at k=0
+        # cos = 1 and sin = 0, so it contributes `lr_k0 · Σq / V` to every atom
+        # of the system. Zero for p <= 3 and for padding systems (Σq = 0).
+        seg = batch_pbc.pbc_segment_atom
+        charge_tot = jax.ops.segment_sum(
+            q_pbc, seg, num_segments=batch_pbc.structure_mask.shape[0]
+        )
+        phi_pbc += (k0_pbc * charge_tot / volume_pbc)[seg] * batch_pbc.pbc_atom_mask
+
         phi_full = jax.ops.segment_sum(phi_pbc, batch_pbc.pbc_to_flat, num_segments=N_all)
         corr = _kspace_corrections(
             charges,

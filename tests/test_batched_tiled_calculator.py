@@ -495,3 +495,49 @@ def test_charge_sign_symmetry():
         rtol=1e-10,
         err_msg="E(q) != E(-q): linear charge term present",
     )
+
+
+# ---------------------------------------------------------------------------
+# k=0 handling for p > 3, where lr(smearing, 0) is finite
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("exponent", [1, 2, 3, 4, 5, 6])
+@pytest.mark.parametrize("halfspace", [True, False])
+def test_nonneutral_exponents_vs_serial(exponent, halfspace):
+    """Non-neutral systems at p > 3 pin the k=0 term.
+
+    The tiled kernel builds its own `W` instead of going through
+    `solvers.ewald.kspace`, so it has to mask k2 == 0 and add the k->0 limit
+    back once per system itself. Without the mask each padding k-row injects a
+    spurious `lr_k0 * sum(q)`; the error is invisible for neutral systems and
+    for p <= 3 (where `lr_k0` is zero), hence the non-neutral charges here.
+    """
+    from ase import Atoms
+
+    from jaxpme.batched_tiled.calculators import Ewald
+    from jaxpme.calculators import Ewald as SerialEwald
+
+    rng = np.random.default_rng(4)
+    n, box, cutoff = 6, 5.0, 4.0
+    charges = np.array([1.0, 1.0, 1.0, -0.5, -0.5, 0.5])
+    assert charges.sum() != 0.0
+
+    atoms = Atoms(
+        numbers=[1] * n,
+        positions=rng.uniform(0, box, (n, 3)),
+        cell=np.diag([box] * 3),
+        pbc=True,
+    )
+    atoms.set_initial_charges(charges)
+
+    calculator = Ewald(exponent=exponent, prefactor=1.0, halfspace=halfspace)
+    args = calculator.prepare([atoms], num_k=800, cutoff=cutoff, smearing=cutoff / 4)
+    energy = np.asarray(calculator.energy(*args))[args[1].structure_mask][0]
+
+    serial = SerialEwald(exponent=exponent)
+    energy_ref = float(
+        serial.energy(*serial.prepare(atoms, None, cutoff, cutoff / 8, cutoff / 4))
+    )
+
+    np.testing.assert_allclose(energy, energy_ref, rtol=1e-8)

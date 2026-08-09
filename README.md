@@ -32,7 +32,7 @@ Currently, the high-level API of this package is designed to compute (a) potenti
 
 ### Design
 
-This package has to respect the constraints of `jax`, and is therefore designed differently than its `torch` counterpart. The relevant issue here is that `jax` is not designed to manage stateful classes, and it requires array shapes to be known ahead of time. For example, the shape of the reciprocal-space grid (the $k$-grid), which depends both on convergence parameters like `lr_wavelength` (the cutoff in reciprocal space, i.e., the minimum wavelength) and the periodic `cell` of the system, has to be known ahead of time. This is different to the `torch` version, where we can just compute it in `forward`. We also need to be careful to ensure that all operations relevant to differentiation happen inside the scope of the calculation function, since `jax` traces the computation, and doesn't track the arrays across compuations like `torch`.
+This package has to respect the constraints of `jax`, and is therefore designed differently than its `torch` counterpart. The relevant issue here is that `jax` is not designed to manage stateful classes, and it requires array shapes to be known ahead of time. Preprocessing steps (k-grid shape computation, charge handling) use plain `numpy` to avoid unnecessary JAX device allocation. For example, the shape of the reciprocal-space grid (the $k$-grid), which depends both on convergence parameters like `lr_wavelength` (the cutoff in reciprocal space, i.e., the minimum wavelength) and the periodic `cell` of the system, has to be known ahead of time. This is different to the `torch` version, where we can just compute it in `forward`. We also need to be careful to ensure that all operations relevant to differentiation happen inside the scope of the calculation function, since `jax` traces the computation, and doesn't track the arrays across compuations like `torch`.
 
 `jax-pme` is designed accordingly: The actual compute functions are pure functions that accept the relevant arguments for differentiation (`positions`, `charges`, `cell`) as well as information like the shape of the `k-grid`. As a consequence, they can be traced and transformed by `jax`, for instance with `jax.grad` and `jax.jit`. Provided inputs are padded appropriately, even `vmap` and `scan` can be used.
 
@@ -55,7 +55,7 @@ They are instantiated just like any other class, by calling
 from jaxpme import Ewald, PME, P3M
 
 calculator = Ewald(
-	exponent=1,  # corresponds to electrostatics
+	exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
 	exclusion_radius=None,  # if this is not None, purely long-range potentials are computed (see preprint)
 	prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
 	custom_potential=None,  # mostly for testing -- you can define custom potential functions
@@ -63,7 +63,7 @@ calculator = Ewald(
 	)
 
 calculator = PME(
-    exponent=1,  # corresponds to electrostatics
+    exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
     exclusion_radius=None,  # if this is not None, purely long-range potentials are computed (see preprint)
     prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
     interpolation_nodes=4,  # currently only 4 is supported
@@ -72,7 +72,7 @@ calculator = PME(
 	)
 
 calculator = P3M(
-    exponent=1,  # corresponds to electrostatics
+    exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
     exclusion_radius=None,  # if this is not None, purely long-range potentials are computed (see preprint)
     prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
     interpolation_nodes=4,  # B-spline interpolation, supports 1-5
@@ -85,7 +85,9 @@ calculator = P3M(
 
 The functions exposed by `Calculator` consist of a `prepare` function that arranges all the inputs required for calculations of some input structure, including determining the shape of the reciprocal-space grid, and a bundle of functions that then execute different calculations.
 
-`prepare` expects the arguments `atoms` (`ase.Atoms` instance), `charges`, `cutoff` (for the real-space neighborlist), `mesh_spacing` (PME/P3M) or `lr_wavelength` (Ewald) (defining the resolution/cutoff in reciprocal space), `smearing` (range separation parameter, related to `cutoff`). The parameters can be tuned with `torch-pme` or set heuristically (see `torch-pme` docs). It returns a tuple of inputs `charges, *graph, k_grid, smearing`, where `*graph` collects `cell`, `positions`, neighbor indices `i` and `j`, and `cell_shifts`. `k_grid` is a dummy array that defines the *shape* of the reciprocal-space grid via its `shape`, its values are not used. `prepare` is not `jax.jit`-able as it returns variable-shape output.
+`prepare` expects the arguments `atoms` (`ase.Atoms` instance), `charges`, `cutoff` (for the real-space neighborlist), `mesh_spacing` (PME/P3M) or `lr_wavelength` (Ewald) (defining the resolution/cutoff in reciprocal space), `smearing` (range separation parameter, related to `cutoff`). The parameters can be tuned with `torch-pme` or set heuristically (see `torch-pme` docs). It returns a tuple of inputs `charges, *graph, k_grid, smearing`, where `*graph` collects `cell`, `positions`, neighbor indices `i` and `j`, and `cell_shifts`. `k_grid` is a dummy array that defines the *shape* of the reciprocal-space grid via its `shape`, its values are not used. `prepare` is not `jax.jit`-able as it returns variable-shape output. (`Ewald` additionally appends `pbc` to the tuple, used to route non-periodic structures; see below.)
+
+Non-periodic structures (`pbc=[False, False, False]`) are supported by `Ewald`: there is no periodic image to sum, so `prepare` builds the all-pairs list (half by default, both directions with `full_neighbor_list=True`) and `potentials` evaluates a bare $1/r^p$ sum (no real-space cutoff, no range separation). Serial `PME`/`P3M` do not yet support non-PBC inputs (their reciprocal block divides by the zero cell volume) — use `Ewald` or a batched calculator instead.
 
 The following calculation functions are implemented:
 

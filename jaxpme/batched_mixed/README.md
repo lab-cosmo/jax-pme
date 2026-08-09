@@ -15,7 +15,9 @@ charges, batch, batch_nopbc, batch_pbc = calculator.prepare(atoms_list, cutoff=5
 potentials = calculator.potentials(charges, batch, batch_nopbc, batch_pbc)
 energies = calculator.energy(charges, batch, batch_nopbc, batch_pbc)
 energies, forces = calculator.energy_forces(charges, batch, batch_nopbc, batch_pbc)
-energies, forces, stress = calculator.energy_forces_stress(charges, batch, batch_nopbc, batch_pbc)
+energies, forces, stress = calculator.energy_forces_stress(
+    charges, batch, batch_nopbc, batch_pbc
+)
 ```
 
 ## Batch Structures

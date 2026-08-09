@@ -55,12 +55,12 @@ They are instantiated just like any other class, by calling
 from jaxpme import Ewald, PME, P3M
 
 calculator = Ewald(
-	exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
-	exclusion_radius=None,  # if this is not None, purely long-range potentials are computed (see preprint)
-	prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
-	custom_potential=None,  # mostly for testing -- you can define custom potential functions
-	full_neighbor_list=False,  # set True if your neighborlist includes both i->j and j->i
-	)
+    exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
+    exclusion_radius=None,  # if this is not None, purely long-range potentials are computed (see preprint)
+    prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
+    custom_potential=None,  # mostly for testing -- you can define custom potential functions
+    full_neighbor_list=False,  # set True if your neighborlist includes both i->j and j->i
+)
 
 calculator = PME(
     exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
@@ -69,7 +69,7 @@ calculator = PME(
     interpolation_nodes=4,  # currently only 4 is supported
     custom_potential=None,  # mostly for testing -- you can define custom potential functions
     full_neighbor_list=False,  # set True if your neighborlist includes both i->j and j->i
-	)
+)
 
 calculator = P3M(
     exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
@@ -78,7 +78,7 @@ calculator = P3M(
     interpolation_nodes=4,  # B-spline interpolation, supports 1-5
     custom_potential=None,  # mostly for testing -- you can define custom potential functions
     full_neighbor_list=False,  # set True if your neighborlist includes both i->j and j->i
-	)
+)
 
 # -> calculator.prepare, .energy, etc ... can be called
 ```
@@ -115,9 +115,9 @@ It is *highly* recommended to tune convergence parameters for your specific syst
 For computing energies/forces across multiple structures (e.g. for training), batched implementations are available:
 
 ```python
-from jaxpme.batched_mixed import Ewald   # rectangular max-padding, supports cutoff-only API
-from jaxpme.batched_tiled import Ewald   # per-system sum-padding + tile dispatch (see below)
-from jaxpme.batched_flat import Ewald    # alternative flat padding strategy
+from jaxpme.batched_mixed import Ewald  # rectangular max-padding, supports cutoff-only API
+from jaxpme.batched_tiled import Ewald  # per-system sum-padding + tile dispatch (see below)
+from jaxpme.batched_flat import Ewald  # alternative flat padding strategy
 ```
 
 All three accept lists of `ase.Atoms` in `prepare` and handle padding/masking internally. Currently, only batched `Ewald` is implemented. 2D PBC (slab geometries) is supported for arbitrary triclinic cells; large vacuum gaps are automatically shrunk to keep the k-grid efficient. The shrunk cell travels separately from the raw `Batch.cell` and the calculators compose the two at entry — see `jaxpme.utils.compose_cell` for the mechanism and gradient policy (2D-slab stress no longer includes the shrink's artifact gradient). Consequence: for 2D PBC the stress components touching the non-periodic direction carry only the per-atom term and should be treated as meaningless; the in-plane block is correct.

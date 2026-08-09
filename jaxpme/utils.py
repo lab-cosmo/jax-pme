@@ -20,6 +20,23 @@ def atoms_to_graph(atoms, cutoff, full_list=False):
     return cell, positions, i, j, S
 
 
+def compose_cell(batch):
+    """The cell the Ewald math consumes.
+
+    `batch.cell` is the raw data cell; `batch.effective_cell` is the cell
+    the math needs (for 2D pbc, `prepare` shrinks the vacuum vector — a
+    position-dependent convergence trick). `batch.pbc` [S, 3] is the mask
+    that picks per lattice vector: True -> raw, False -> effective. The two
+    agree on periodic rows, so the values are effective everywhere while
+    gradients (stress) reach `batch.cell` through periodic rows only — the
+    shrink's cell-gradient is an artifact and is deliberately dropped.
+    `effective_cell=None`: `cell` is already effective, pass through.
+    """
+    if batch.effective_cell is None:
+        return batch.cell
+    return jnp.where(batch.pbc[:, :, None], batch.cell, batch.effective_cell)
+
+
 def get_distances(cell, Ra, Rb, cell_shifts):
     # we can't use mic: the unit tests use small cells
     R = Rb - Ra

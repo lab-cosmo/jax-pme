@@ -55,12 +55,12 @@ They are instantiated just like any other class, by calling
 from jaxpme import Ewald, PME, P3M
 
 calculator = Ewald(
-	exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
-	exclusion_radius=None,  # if this is not None, purely long-range potentials are computed (see preprint)
-	prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
-	custom_potential=None,  # mostly for testing -- you can define custom potential functions
-	full_neighbor_list=False,  # set True if your neighborlist includes both i->j and j->i
-	)
+    exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
+    exclusion_radius=None,  # if this is not None, purely long-range potentials are computed (see preprint)
+    prefactor=1.0,  # default to Gauss units. jaxpme.prefactors.eV_A for standard ase units
+    custom_potential=None,  # mostly for testing -- you can define custom potential functions
+    full_neighbor_list=False,  # set True if your neighborlist includes both i->j and j->i
+)
 
 calculator = PME(
     exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
@@ -69,7 +69,7 @@ calculator = PME(
     interpolation_nodes=4,  # currently only 4 is supported
     custom_potential=None,  # mostly for testing -- you can define custom potential functions
     full_neighbor_list=False,  # set True if your neighborlist includes both i->j and j->i
-	)
+)
 
 calculator = P3M(
     exponent=1,  # p in 1/r^p, integer 1-6; 1 corresponds to electrostatics
@@ -78,7 +78,7 @@ calculator = P3M(
     interpolation_nodes=4,  # B-spline interpolation, supports 1-5
     custom_potential=None,  # mostly for testing -- you can define custom potential functions
     full_neighbor_list=False,  # set True if your neighborlist includes both i->j and j->i
-	)
+)
 
 # -> calculator.prepare, .energy, etc ... can be called
 ```
@@ -115,10 +115,19 @@ It is *highly* recommended to tune convergence parameters for your specific syst
 For computing energies/forces across multiple structures (e.g. for training), batched implementations are available:
 
 ```python
-from jaxpme.batched_mixed import Ewald  # or jaxpme.batched_flat
+from jaxpme.batched_mixed import Ewald  # rectangular max-padding, supports cutoff-only API
+from jaxpme.batched_tiled import Ewald  # per-system sum-padding + tile dispatch (see below)
+from jaxpme.batched_flat import Ewald  # alternative flat padding strategy
 ```
 
-These accept lists of `ase.Atoms` in `prepare` and handle padding/masking internally. Currently, only batched `Ewald` is implemented. 2D PBC (slab geometries) is supported for arbitrary triclinic cells; large vacuum gaps are automatically shrunk to keep the k-grid efficient.
+All three accept lists of `ase.Atoms` in `prepare` and handle padding/masking internally. Currently, only batched `Ewald` is implemented. 2D PBC (slab geometries) is supported for arbitrary triclinic cells; large vacuum gaps are automatically shrunk to keep the k-grid efficient. The shrunk cell travels separately from the raw `Batch.cell` and the calculators compose the two at entry — see `jaxpme.utils.compose_cell` for the mechanism and gradient policy (2D-slab stress no longer includes the shrink's artifact gradient). Consequence: for 2D PBC the stress components touching the non-periodic direction carry only the per-atom term and should be treated as meaningless; the in-plane block is correct.
+
+`batched_tiled` is a second Ewald backend designed for heterogeneous batches: atoms are **sum-padded per system** (each system padded to `⌈N_b/BM⌉·BM` atoms, concatenated into one flat array) rather than max-padded to the batch's largest system. The reciprocal sum runs through a pure-JAX tile-dispatched kernel over fixed-size `(BM × BK)` work tiles — `vmap + segment_sum` for pass 1's structure factors, `vmap + reshape-sum` for pass 2's per-atom potential. Trade-offs vs `batched_mixed`:
+
+- **`num_k` is required** on `prepare` and fixes the reciprocal grid (per-cell K target via `lr_wavelength_for_num_k`; the K axis stays rectangular so all systems share `K_pad`). The real-space `cutoff` follows it: omit it and it is derived as `lr_wavelength · 8` (with `smearing = lr_wavelength · 2`), matching `batched_mixed`, so real and reciprocal space stay balanced. An explicit `cutoff` overrides only the real-space radius (`smearing` still tracks `num_k`).
+- **Tile sizes `(BM, BK)` are fixed at prepare time** (defaults `BM=32, BK=128`). They drive both the per-system atom padding and the kernel tile dimensions.
+- Lower memory and faster on heterogeneous batches where system sizes vary by a lot (small molecules + larger crystals/MOFs in the same batch).
+- **Host-side batching is exposed for external pipelines**: `batched_tiled.batching.sample_shapes` gives the per-sample size accounting `get_batch` itself uses (for batch-size planners), and `get_batch(samples=[], dtype=...)` builds a pure-padding batch at explicit sizes; `int_dtype=` sets the neighbor-list index dtype (default int64).
 
 ## Development
 

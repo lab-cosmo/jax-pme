@@ -260,7 +260,7 @@ def test_iplp_2d_pbc_returns_nan():
 
 
 def test_matches_batched_mixed():
-    """Bit-exact equivalence vs batched_mixed at identical params (fp64)."""
+    """Equivalence vs batched_mixed at identical params (fp64, sum-order noise only)."""
     from jaxpme.batched_mixed.calculators import Ewald as MixedEwald
     from jaxpme.batched_tiled.calculators import Ewald as TiledEwald
 

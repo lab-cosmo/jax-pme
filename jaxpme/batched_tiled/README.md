@@ -1,6 +1,6 @@
 # Batched Ewald: Tiled Approach
 
-A batched Ewald backend designed for **heterogeneous** atom counts across the batch. Atoms are sum-padded per system (each system padded individually to a multiple of `BM`), and the reciprocal sum runs through a pure-JAX tile-dispatched kernel (`vmap + segment_sum` in pass 1, `vmap + reshape-sum` in pass 2). Stress works through autograd — no `custom_vjp`, no `stop_gradient` on `kvec/W`.
+A batched Ewald backend designed for **heterogeneous** atom counts across the batch. Atoms are sum-padded per system (each system padded individually to a multiple of `BM`), and the reciprocal sum runs through a pure-JAX tile-dispatched kernel (`vmap + segment_sum` in pass 1, `vmap + reshape-sum` in pass 2).
 
 ## Usage
 
@@ -57,16 +57,16 @@ In a batch of three systems with `(N_0, K_0), (N_1, K_1), (N_2, K_2)` shapes, th
 
 ```
    sys 0 (5 atoms, BM=4)   sys 1 (3 atoms)   sys 2 (9 atoms)
-   ┌───────────────┐       ┌───────┐         ┌───────────────────────┐
-   │aaaaa--- ────  │       │aaa-   │         │aaaaaaaaa--- ──── ──── │
-   └───────────────┘       └───────┘         └───────────────────────┘
-   |←  8 slots    →|       |← 4   →|         |←     12 slots        →|
+   ┌────────┐              ┌────┐            ┌────────────┐
+   │aaaaa---│              │aaa-│            │aaaaaaaaa---│
+   └────────┘              └────┘            └────────────┘
+    8 slots                 4 slots           12 slots
                           flat array:
                   ┌────────┬────┬───────────────┐
                   │ 8 (s0) │ 4  │   12 (s2)     │     N_pbc_total = 24
                   └────────┴────┴───────────────┘
    pbc_atom_off:  0       8    12              24
-   pbc_atom_mask: 11111000-1110-111111111000000000000000
+   pbc_atom_mask: 11111000-1110-111111111000
 ```
 
 Variable n_atom_tiles per system: `s0`→2 tiles, `s1`→1 tile, `s2`→3 tiles.
@@ -100,7 +100,7 @@ The kernel `jax.vmap`s `per_triple(...)` over the table; each call computes a `[
 
 ### JIT cache stability
 
-The dispatch table has **shape `[T, 3]`** that depends only on the bucket-rounded `N_pbc_total` and `K_pad` (via `next_size`) — not on per-system N_b. Contents are runtime data; JIT keys on shape, not values. Same-bucket batches reuse the JIT cache regardless of how atoms are distributed across systems. Compile only happens when a batch bumps to a new bucket. (The "built on host" point above is about not constructing it inside the JIT trace — at runtime it lives on device like the other inputs.)
+The dispatch table has **shape `[T, 3]`** that depends only on the bucket-rounded `N_pbc_total` and `K_pad` (via `next_size`) — not on per-system N_b. Contents are runtime data; JIT keys on shape, not values. Same-bucket batches reuse the JIT cache regardless of how atoms are distributed across systems. Compile only happens when a batch bumps to a new bucket. (The "not in the JIT trace" point above is about not constructing the table during tracing — at runtime it lives on device like the other inputs.)
 
 ## Contracts
 

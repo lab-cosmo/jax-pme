@@ -167,9 +167,8 @@ def get_batch(
     n_pairs_nonpbc = next_size(_total_pairs_nonpbc, strategy=num_pairs_nonpbc)
 
     # K_pad: bucket-rounded max-K, then rounded up to a multiple of BK so the
-    # kernel sees a clean tile grid. Padding rows have k=0 -> W=0, contribute
-    # nothing (halfspace excludes k=0; for full-space coulomb.lr_k2(s, 0) is
-    # zeroed via the coulomb() wrapper in potentials.py).
+    # kernel sees a clean tile grid. Padding rows have k=0 and contribute
+    # nothing: the calculator masks k2 == 0 out of W (see `_kspace_setup`).
     k_size = next_size(_max_k, strategy=num_k_strat)
     K_pad = int(np.ceil(k_size / BK) * BK)
 

@@ -42,8 +42,12 @@ def _scratch_bytes(fn, args):
 def test_kernel_scratch_scales_with_tile_not_kpad(method):
     """Scratch must track the [T, BM, BK] trig blocks, not T·K_pad.
 
-    A correctly tiled kernel sits at 3-5x the trig block across sizes; one that
-    gathers `kvec[b]` per tile runs an order of magnitude above that.
+    A correctly tiled kernel sits at 3-5x the trig block across sizes. The
+    gather only surfaces on the AD paths, where the gathered k-axis is saved as
+    a backward residual (~65x the trig block here); the forward-only
+    `potentials` gather is fused away by XLA even at this size, so the AD
+    parametrizations are the load-bearing ones — do not trim down to
+    `potentials` (it still bounds forward scratch).
     """
     calculator, args = _tiled_case()
     _, _, _, batch_pbc = args

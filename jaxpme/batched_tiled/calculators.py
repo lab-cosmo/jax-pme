@@ -4,8 +4,7 @@ Same API surface as `jaxpme.batched_mixed.calculators.Ewald`: returns a
 `Calculator` namedtuple with `prepare`, `potentials`, `energy`, `energy_forces`,
 `energy_forces_stress`. The reciprocal sum routes through
 `phi_recip_xla_vmap` over the sum-padded flat-atom layout produced by
-`batching.get_batch`. Stress flows naturally through autograd (no custom_vjp,
-no `stop_gradient` on `kvec` / `W`).
+`batching.get_batch`.
 """
 
 import jax
@@ -30,11 +29,7 @@ def Ewald(
     custom_potential=None,
     halfspace=True,
 ):
-    """Tile-dispatched batched Ewald calculator.
-
-    Tile sizes BM, BK live on `prepare`, not here — they are batch-construction
-    parameters, not calculator parameters.
-    """
+    """Tile-dispatched batched Ewald calculator."""
     from jaxpme.solvers import ewald
 
     pot = potential(
@@ -92,10 +87,8 @@ def Ewald(
         # per-system k->0 limit, applied once (no g_factor: k=0 has no -k partner)
         k0_pbc = jax.vmap(pot.lr)(smearing_pbc, jnp.zeros_like(smearing_pbc))
 
-        # BM/BK survive the prefetch / device_put pipeline as dummy-array
-        # shape metadata (see `batched_tiled.batching.get_batch`). Reading
-        # `.shape[0]` recovers the static Python int needed by the tiled
-        # kernel's `lax.dynamic_slice` size arguments.
+        # BM/BK travel as dummy-array shapes; `.shape[0]` recovers the static
+        # int the kernel needs (see `batching.get_batch`)
         n_kvec_tiles = batch_pbc.k_grid.shape[1] // batch_pbc.BK.shape[0]
         atom_off = jnp.asarray(batch_pbc.pbc_atom_off)
         dispatch_table = jnp.asarray(batch_pbc.dispatch_table)
@@ -302,8 +295,8 @@ def Ewald(
             total_energy_fn, argnums=1, has_aux=True, allow_int=True
         )(charges, batch, batch_nopbc, batch_pbc)
         forces = -grads.positions * batch.atom_mask[:, None]
-        # σ_αβ = (1/V) Σ_i r_iα ∂E/∂r_iβ + (cell ∂E/∂cell)_αβ — the standard
-        # virial form, split into per-atom and per-cell pieces.
+        # virial Σ_i r_iα ∂E/∂r_iβ + (cell ∂E/∂cell)_αβ, split into per-atom
+        # and per-cell pieces; no 1/V (matches serial and batched_mixed)
         stress = (
             jax.ops.segment_sum(
                 jnp.einsum("ia,ib->iab", batch.positions, grads.positions),
@@ -323,8 +316,7 @@ def Ewald(
         BK=128,
     ):
         # `cutoff`/`smearing` default to balanced values from `num_k`; see
-        # `batching.prepare`. Unlike batched_mixed, `num_k` works with either
-        # halfspace setting here.
+        # `batching.prepare`
         from .batching import get_batch, prepare
 
         return get_batch(

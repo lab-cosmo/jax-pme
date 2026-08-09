@@ -88,7 +88,7 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
   solvers (PME/P3M) pick up k=0 through their own grids with weight 1
 - `batched_tiled` does **not** route through `solvers.ewald.kspace` — it builds
   `W` itself — so it repeats the mask-and-add-back in `_kspace_setup` /
-  `kspace_fn`. Its sum-padded k-axis makes this load-bearing: every padding row
+  `kspace_fn`. Its max-padded k-axis makes this load-bearing: every padding row
   sits at k=0, so an unmasked `W` would inject `lr_k0 · Σq` once per padding
   row. Invisible for neutral systems and for p ≤ 3; pinned by
   `test_nonneutral_exponents_vs_serial`

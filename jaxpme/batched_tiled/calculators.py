@@ -47,6 +47,13 @@ def Ewald(
 
     # raw potential for correction-side dispatch (Coulomb gets 2D slab,
     # inverse-power-law does not — returns NaN for 2D PBC)
+    #
+    # Note this does not consult `_raw.correction_pbc`: that signature takes
+    # one system's full position/charge arrays, which the flat sum-padded
+    # layout does not have. 2D slab is reimplemented here against the flat
+    # layout, so a custom potential's own `correction_pbc` is bypassed and 2D
+    # PBC yields NaN. batched_mixed honours it — use that backend for custom
+    # potentials on slabs.
     from jaxpme.potentials import coulomb, inverse_power_law
 
     if custom_potential is not None:
@@ -295,12 +302,8 @@ def Ewald(
         BK=128,
     ):
         # `cutoff`/`smearing` default to balanced values from `num_k`; see
-        # `batching.prepare`.
-        if not halfspace:
-            # full-k-space path still works; flag kept for parity with
-            # batched_mixed where `num_k` was halfspace-only.
-            pass
-
+        # `batching.prepare`. Unlike batched_mixed, `num_k` works with either
+        # halfspace setting here.
         from .batching import get_batch, prepare
 
         return get_batch(

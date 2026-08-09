@@ -10,10 +10,8 @@ from jaxpme.batched_tiled import Ewald
 calculator = Ewald(prefactor=1.0)
 
 # num_k is REQUIRED — sets per-cell K-vec target via lr_wavelength_for_num_k.
-# cutoff is still required for the real-space neighbor list.
-charges, batch, batch_nopbc, batch_pbc = calculator.prepare(
-    atoms_list, num_k=200, cutoff=5.0
-)
+# The real-space cutoff derives from it; pass cutoff= only to override.
+charges, batch, batch_nopbc, batch_pbc = calculator.prepare(atoms_list, num_k=200)
 
 potentials = calculator.potentials(charges, batch, batch_nopbc, batch_pbc)
 energies = calculator.energy(charges, batch, batch_nopbc, batch_pbc)
@@ -122,7 +120,9 @@ The dispatch table has **shape `[T, 3]`** that depends only on the bucket-rounde
 
 5. **Charges from ASE** — `atoms.get_initial_charges()`, pass back to methods.
 
-6. **Coulomb only for 2D-PBC slab correction.** Inverse-power-law + 2D-PBC returns NaN (unsupported correction — same as `batched_mixed`).
+6. **Coulomb only for 2D-PBC slab correction.** Inverse-power-law + 2D-PBC returns NaN (unsupported correction — same as `batched_mixed`). A `custom_potential` also returns NaN for 2D PBC *even if it implements `correction_pbc`*: that hook takes one system's full arrays, which the flat sum-padded layout does not have, so the slab term is reimplemented here rather than delegated. `batched_mixed` honours it — use that backend for custom potentials on slabs.
+
+7. **2D-PBC stress is periodic-block only.** `compose_cell` drops the cell gradient on the non-periodic lattice vector (the vacuum shrink is a convergence trick, and its gradient is an artifact), so the `cell · ∂E/∂cell` term contributes nothing along that axis while the per-atom term still does. Treat the components touching the non-periodic direction as meaningless; the in-plane block is correct.
 
 ## Padding strategy
 

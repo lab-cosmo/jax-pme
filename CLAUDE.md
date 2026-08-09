@@ -37,6 +37,14 @@ tests/
 - **Batched**: `jaxpme.batched_mixed.Ewald()` → `.prepare([atoms_list], cutoff)` → same methods but batched
 - **Tiled batched**: `jaxpme.batched_tiled.Ewald()` → `.prepare([atoms_list], num_k)` — sum-pads atoms per system (heterogeneous-batch friendly), routes reciprocal sum through tile-dispatched XLA kernel. `num_k` is the single required knob: it fixes the k-grid and the real-space `cutoff` derives from it, so `cutoff` is normally omitted (pass it only to override). See README for the convention.
 
+### batched_tiled kernel invariant
+Per-tile code in `kernel.py` must fold the system index `b` into the
+`lax.dynamic_slice` start, never index as `arr[b]`: under `vmap` that is a
+gather materialising the full trailing axis *per work tile* (`[T, K_pad, 3]`),
+which is exactly the matrix the tiling exists to avoid. XLA fuses it away at
+small sizes and gives up as `T · K_pad` grows, so the cost appears suddenly.
+Pinned by `tests/test_batched_tiled_kernel_memory.py` via `memory_analysis()`.
+
 ### PME vs P3M
 - **PME**: Lagrange interpolation (4-node). Faster but forces less smooth.
 - **P3M**: B-spline interpolation (n=1-5) with influence function correction. Smoother forces, better for MD.
@@ -50,6 +58,9 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
 - Serial Ewald returns NaN for non-PBC structures (only batched calculators
   handle non-PBC via bare 1/r) — see open issue for fallback
 - Power-law potentials raise `NotImplementedError` for mixed PBC corrections
+- `batched_tiled` + `custom_potential` + 2D PBC returns NaN: the flat sum-padded
+  layout can't call `correction_pbc` (needs one system's full arrays), so the
+  slab term is reimplemented Coulomb-only. Use `batched_mixed` for that case.
 - `calculators.py` has TODO for PME/P3M parameter tuning logic
 - `batched_tiled.prepare` requires `num_k` and has no cutoff-only path (unlike `batched_mixed`)
 
@@ -58,7 +69,7 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
 - `correction_pbc` in `potentials.py` projects onto the plane normal via cross product
 - `shrink_2d_cell` in `batching.py` reduces the non-periodic cell vector before deriving Ewald parameters, preventing large vacuum from inflating the k-grid
 - Vacuum gap formula: `h_min = thickness + 1.5 * L_max` (residual ≈ exp(-3π) ≈ 7e-5)
-- Raw/effective cell split (both batched families): `prepare` keeps `structure["cell"]` raw, the shrunk cell travels alongside, and calculators compose at entry. Canonical explanation (incl. `Batch.pbc` as the row mask and the gradient policy): `jaxpme.utils.compose_cell`
+- Raw/effective cell split (both batched families): `prepare` keeps `structure["cell"]` raw, the shrunk cell travels alongside, and calculators compose at entry. Canonical explanation (incl. `Batch.pbc` as the row mask and the gradient policy): `jaxpme.utils.compose_cell`. Consequence: 2D-PBC stress is only meaningful in the periodic block — the non-periodic row gets no cell-gradient term.
 
 ## Testing
 Run from the package root: `python -m pytest tests/ -v`

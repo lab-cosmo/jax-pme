@@ -183,7 +183,10 @@ def get_batch(
     N_pbc_total = next_size(N_pbc_total_min + 1, strategy=num_atoms_pbc)
     # ensure multiple of BM so the kernel's M_TILES = N_pbc_total // BM is exact
     N_pbc_total = int(np.ceil(N_pbc_total / BM) * BM)
-    # stash slack in the last (always-padding) pbc system
+    # stash slack in the last pbc system. Usually that is a padding system, but
+    # when `_total_pbc` lands on a bucket boundary every slot is real and the
+    # slack extends a real system's block instead -- harmless, the extra slots
+    # keep `padding_atom_idx` / `mask=False` and contribute zero.
     pbc_n_padded[-1] += N_pbc_total - N_pbc_total_min
 
     pbc_atom_off = np.zeros(B_pbc_padded + 1, dtype=np.int32)

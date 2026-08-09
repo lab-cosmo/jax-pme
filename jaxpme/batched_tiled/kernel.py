@@ -28,6 +28,11 @@ order-agnostic). Pass 2 reduces across k-tiles within each `(b, m_tile)`
 segment via `reshape + sum(axis=1)`, since the table's outer-m_tile ordering
 makes those segments exactly `n_kvec_tiles`-row contiguous chunks. Stress flows
 through naturally because `kvec` and `W` cotangents are not blocked.
+
+Invariant: no per-tile expression may *index* a `[B, ...]` array by `b` — under
+vmap that is a gather of the full trailing axis per tile. The system index goes
+into the `dynamic_slice` start, so every intermediate stays tile-sized. See
+`tests/test_batched_tiled_kernel_memory.py`, which pins this.
 """
 
 import jax
@@ -74,7 +79,10 @@ def phi_recip_xla_vmap(
     def per_triple1(triple):
         b, mt, kt = triple[0], triple[1], triple[2]
         a_offset = atom_off[b] + mt * BMc
-        kv = lax.dynamic_slice(kvec[b], (kt * BKc, ZERO), (BK, 3))
+        # `b` must go into the slice start, not into an index: under vmap,
+        # `kvec[b]` is a gather that materialises [T, K_pad, 3] -- the whole
+        # k-axis per tile, i.e. exactly the matrix the tiling exists to avoid.
+        kv = lax.dynamic_slice(kvec, (b, kt * BKc, ZERO), (1, BK, 3))[0]
         rt = lax.dynamic_slice(r, (a_offset, ZERO), (BM, 3))
         qt = lax.dynamic_slice(q, (a_offset,), (BM,))
         theta = rt @ kv.T
@@ -100,10 +108,11 @@ def phi_recip_xla_vmap(
     def per_triple2(triple):
         b, mt, kt = triple[0], triple[1], triple[2]
         a_offset = atom_off[b] + mt * BMc
-        kv = lax.dynamic_slice(kvec[b], (kt * BKc, ZERO), (BK, 3))
-        Wt = lax.dynamic_slice(W[b], (kt * BKc,), (BK,))
-        Sr_t = lax.dynamic_slice(Sr[b], (kt * BKc,), (BK,))
-        Si_t = lax.dynamic_slice(Si[b], (kt * BKc,), (BK,))
+        # see per_triple1: `b` folded into the start index, never an index
+        kv = lax.dynamic_slice(kvec, (b, kt * BKc, ZERO), (1, BK, 3))[0]
+        Wt = lax.dynamic_slice(W, (b, kt * BKc), (1, BK))[0]
+        Sr_t = lax.dynamic_slice(Sr, (b, kt * BKc), (1, BK))[0]
+        Si_t = lax.dynamic_slice(Si, (b, kt * BKc), (1, BK))[0]
         rt = lax.dynamic_slice(r, (a_offset, ZERO), (BM, 3))
         theta = rt @ kv.T
         c = jnp.cos(theta)

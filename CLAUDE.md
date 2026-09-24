@@ -121,6 +121,7 @@ Run from the package root: `python -m pytest tests/ -v`
 - Format with `ruff format . && ruff check --fix .`
 
 ## Releasing
+- `/release [patch|minor|major]` (`.claude/commands/release.md`) walks through the steps below
 - Push a `v*` tag (e.g. `v0.1.0`) → `.github/workflows/release.yml` builds sdist+wheel and publishes to PyPI via trusted publishing (GitHub environment `release`)
 - Then `gh release create v<version>` with a changelog; nothing in the tree needs a version bump
 

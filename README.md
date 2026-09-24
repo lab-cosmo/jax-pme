@@ -133,6 +133,6 @@ All three accept lists of `ase.Atoms` in `prepare` and handle padding/masking in
 
 The package uses `ruff` for linting and formatting and `pytest` for testing. Please run `ruff format . && ruff check --fix .` before *every* commit or set up a commit hook to do it. Tests can be run in the `tests/` folder with `pytest`. Be aware that the test suite can take a few minutes to run.
 
-Releases are cut by pushing a `v*` tag, which triggers a workflow that builds the package and publishes it to PyPI; the version is derived from the tag via `setuptools_scm`.
+To release a new version, push a `v*` tag. This triggers a workflow that builds the package and publishes it to PyPI; the version is taken from the tag via `setuptools_scm`.
 
 This project is [maintained](https://github.com/lab-cosmo/.github/blob/main/Maintainers.md) by [@E-Rum](https://github.com/E-Rum), and [@sirmarcel](https://github.com/sirmarcel), who will reply to issues and pull requests opened on this repository as soon as possible. You can mention them directly if you did not receive an answer after a couple of days.

@@ -1,7 +1,7 @@
 # Claude Notes: jax-pme
 
 ## What This Is
-JAX implementation of Ewald summation, PME, and P3M for long-range electrostatic interactions. Used in molecular simulations. Version 0.1.0-alpha.1 — API not finalized.
+JAX implementation of Ewald summation, PME, and P3M for long-range electrostatic interactions. Used in molecular simulations. Alpha — API not finalized. Version comes from git tags via `setuptools_scm` (generated `jaxpme/_version.py` is gitignored).
 
 ## Structure
 ```
@@ -120,8 +120,10 @@ Run from the package root: `python -m pytest tests/ -v`
 - Comments purely for understanding tricky things, not explaining code
 - Format with `ruff format . && ruff check --fix .`
 
-## Branch Status
-- `main`: stable release (includes batched implementations from PR #12 and P3M calculator from PR #13)
+## Releasing
+- `/release [patch|minor|major]` (`.claude/commands/release.md`) walks through the steps below
+- Push a `v*` tag (e.g. `v0.1.0`) → `.github/workflows/release.yml` builds sdist+wheel and publishes to PyPI via trusted publishing (GitHub environment `release`)
+- Then `gh release create v<version>` with a changelog; nothing in the tree needs a version bump
 
 ## Contributing
 

@@ -16,13 +16,13 @@ You should also check the [`torch-pme` documentation](https://lab-cosmo.github.i
 
 This package requires `jax`. Please make sure to install the appropriate version for your setup.
 
-Once this has been done, you can clone this repository, and run:
+Once this has been done, you can install the latest release from PyPI:
 
 ```bash
-pip install -e .
+pip install jax-pme
 ```
 
-inside the folder. The `dev` group contains development dependencies, and can be installed by adding `.[dev]` to the command above.
+For development, clone this repository and run `pip install -e .` inside the folder. The `dev` extra contains development dependencies, and can be installed by adding `.[dev]` to the command.
 
 ## Usage
 
@@ -132,5 +132,7 @@ All three accept lists of `ase.Atoms` in `prepare` and handle padding/masking in
 ## Development
 
 The package uses `ruff` for linting and formatting and `pytest` for testing. Please run `ruff format . && ruff check --fix .` before *every* commit or set up a commit hook to do it. Tests can be run in the `tests/` folder with `pytest`. Be aware that the test suite can take a few minutes to run.
+
+Releases are cut by pushing a `v*` tag, which triggers a workflow that builds the package and publishes it to PyPI; the version is derived from the tag via `setuptools_scm`.
 
 This project is [maintained](https://github.com/lab-cosmo/.github/blob/main/Maintainers.md) by [@E-Rum](https://github.com/E-Rum), and [@sirmarcel](https://github.com/sirmarcel), who will reply to issues and pull requests opened on this repository as soon as possible. You can mention them directly if you did not receive an answer after a couple of days.

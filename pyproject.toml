@@ -1,30 +1,47 @@
-[tool.poetry]
+[build-system]
+requires = ["setuptools>=77", "setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
 name = "jax-pme"
-version = "0.1.0-alpha.1"
 description = "(Particle Mesh) Ewald summation in JAX"
-authors = ["Marcel Langer <dev@marcel.science>"]
+readme = "README.md"
 license = "MIT"
-packages = [
-    {include = "jaxpme"}
+license-files = ["LICENSE"]
+authors = [{ name = "Marcel Langer", email = "dev@marcel.science" }]
+requires-python = ">=3.10"
+dependencies = [
+    "jax>=0.4.30",
+    "vesin>=0.4.0",
+    "ase>=3.22.1",
+    "numpy",
+]
+dynamic = ["version"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
 ]
 
-[tool.poetry.dependencies]
-python = ">=3.10"
-jax = ">=0.4.30"
-vesin = ">=0.4.0"
-ase = ">=3.22.1"
-numpy = "*"
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
 
-[tool.poetry.group.dev.dependencies]
-pytest = "*"
-ruff = "*"
+[project.urls]
+Homepage = "https://github.com/lab-cosmo/jax-pme"
+Repository = "https://github.com/lab-cosmo/jax-pme"
+Issues = "https://github.com/lab-cosmo/jax-pme/issues"
 
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[tool.setuptools_scm]
+version_file = "jaxpme/_version.py"
+
+[tool.setuptools.packages.find]
+include = ["jaxpme*"]
 
 [tool.ruff]
 line-length = 92
+exclude = ["jaxpme/_version.py"]
 
 [tool.ruff.lint]
 select = [
@@ -48,6 +65,3 @@ no-lines-before = ["jax"]
 [tool.ruff.lint.isort.sections]
 "numpy" = ["numpy"]
 "jax" = ["jax", "jax.numpy"]
-
-
-[tool.ruff.lint.extend-per-file-ignores]

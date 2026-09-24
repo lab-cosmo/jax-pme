@@ -42,7 +42,7 @@ jobs:
           else
             python -m pip install jax
           fi
-          python -m pip install pytest ase vesin numpy
+          python -m pip install pytest .
 
       - name: Run tests
         run: python -m pytest tests/ -v

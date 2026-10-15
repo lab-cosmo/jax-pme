@@ -193,7 +193,7 @@ def test_get_batch_empty_samples():
     from jaxpme.batched_tiled.batching import get_batch
     from jaxpme.batched_tiled.calculators import Ewald
 
-    charges, sr, bnp, bp = get_batch([], dtype=np.float64, **_TINY_SIZES)
+    charges, _, sr, bnp, bp = get_batch([], dtype=np.float64, **_TINY_SIZES)
 
     np.testing.assert_array_equal(sr.cell, np.broadcast_to(np.eye(3), sr.cell.shape))
     for mask in (
@@ -230,7 +230,7 @@ def test_get_batch_int_dtype():
     structure = prepare(_make_random_pbc(4, seed=3), num_k=_NUM_K, cutoff=_CUTOFF)
     sizes = {**_TINY_SIZES, "num_atoms_pbc": 64, "num_pairs": 512}
 
-    _, sr, bnp, bp = get_batch([structure], int_dtype=np.int32, **sizes)
+    _, _, sr, bnp, bp = get_batch([structure], int_dtype=np.int32, **sizes)
     for arr in (
         sr.centers,
         sr.others,
@@ -245,7 +245,7 @@ def test_get_batch_int_dtype():
     for arr in (bp.pbc_atom_off, bp.pbc_segment_atom, bp.pbc_to_flat, bp.dispatch_table):
         assert arr.dtype == np.int32
 
-    _, sr64, _, _ = get_batch([structure], **sizes)
+    _, _, sr64, _, _ = get_batch([structure], **sizes)
     assert sr64.centers.dtype == np.int64
 
 
@@ -282,7 +282,7 @@ def test_get_batch_minimal_sizes_contract():
     get_batch(structures, BM=BM, BK=BK, **minimal)
 
     # the boundary itself succeeds too; num_atoms_pbc BM-rounds to sum + BM
-    _, _, _, bp = get_batch(structures, BM=BM, BK=BK, **boundary)
+    _, _, _, _, bp = get_batch(structures, BM=BM, BK=BK, **boundary)
     assert bp.pbc_segment_atom.shape[0] == pbc_padded_sum + BM
 
     for axis in boundary:
@@ -331,7 +331,7 @@ def test_get_batch_cell_split_and_pbc_rows():
         prepare(_make_slab(), num_k=_NUM_K, cutoff=_CUTOFF),
         prepare(_make_random_nonpbc(3, seed=2), num_k=_NUM_K, cutoff=_CUTOFF),
     ]
-    _, sr, _, _ = get_batch(
+    _, _, sr, _, _ = get_batch(
         structures,
         num_structures=4,
         num_structures_pbc=2,
@@ -405,7 +405,7 @@ def test_prepare_nonpbc_keeps_identity_cell():
     structure = prepare(atoms, num_k=_NUM_K, cutoff=_CUTOFF)
     np.testing.assert_array_equal(structure["cell"], np.eye(3))
 
-    _, sr, _, _ = get_batch(
+    _, _, sr, _, _ = get_batch(
         [structure],
         num_structures=2,
         num_structures_pbc=1,

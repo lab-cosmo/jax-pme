@@ -145,3 +145,99 @@ def ewald(potential, full_neighbor_list=False, halfspace=False):
         return pot / 2
 
     return Solver(rspace, kspace)
+
+
+# -- point dipoles (Coulomb only) --
+#
+# A dipole is the charge density -μ·∇δ, so a source (q, μ) at r_j contributes
+# (q - μ·∇)ψ to the potential at r_i, and minus its gradient to the field. In
+# reciprocal space this is the structure factor S(k) = Σ_j (q_j + i k·μ_j) e^{ik·r_j}.
+# Outputs follow the halved convention: φ = Φ/2, F = E/2, so that the energy is
+# Σ q φ - Σ μ·F, dE/dq = 2φ and dE/dμ = -2F.
+
+
+def _rspace_dipole(
+    potential, smearing, charges, dipoles, R, i, j, full_neighbor_list=False
+):
+    from .utils import safe_norm
+
+    N = charges.shape[0]
+
+    r = safe_norm(R, axis=-1)
+    psi, d1, d2 = potential.sr_derivatives(smearing, r)
+
+    # x_hat points from the source j to the target i
+    r_safe = jnp.where(r == 0.0, 1.0, r)
+    x_hat = -R / r_safe[:, None]
+    d1_over_r = d1 / r_safe
+
+    def from_source(q, mu, sign):
+        # sign = -1 for the reverse pair (j <- i), which flips x_hat
+        mu_x = jnp.sum(mu * x_hat, axis=-1)
+        phi = q * psi - sign * d1 * mu_x
+        field = (
+            -sign * (q * d1)[:, None] * x_hat
+            + ((d2 - d1_over_r) * mu_x)[:, None] * x_hat
+            + d1_over_r[:, None] * mu
+        )
+        return phi, field
+
+    phi_ij, field_ij = from_source(charges[j], dipoles[j], 1.0)
+    phi = jax.ops.segment_sum(phi_ij, i, num_segments=N)
+    field = jax.ops.segment_sum(field_ij, i, num_segments=N)
+
+    if not full_neighbor_list:
+        phi_ji, field_ji = from_source(charges[i], dipoles[i], -1.0)
+        phi += jax.ops.segment_sum(phi_ji, j, num_segments=N)
+        field += jax.ops.segment_sum(field_ji, j, num_segments=N)
+
+    return phi / 2, field / 2
+
+
+def ewald_dipole(potential, full_neighbor_list=False, halfspace=False):
+    from .kspace import slab_energy_per_atom, slab_field_per_atom, slab_geometry
+    from .potentials import dipole_self_field
+
+    rspace = partial(_rspace_dipole, potential, full_neighbor_list=full_neighbor_list)
+
+    g_factor = 2 if halfspace else 1
+
+    def kspace(smearing, charges, dipoles, kvectors, positions, volume, cell, pbc):
+        k2 = jax.lax.square(kvectors).sum(axis=-1)  # -> [k]
+
+        # k=0 carries no Coulomb contribution (tin-foil, neutralizing background)
+        G = jnp.where(k2 == 0.0, 0.0, potential.lr(smearing, k2) * g_factor)
+        trig_args = kvectors @ (positions.T)  # -> [k, i]
+
+        c = jnp.cos(trig_args)
+        s = jnp.sin(trig_args)
+        k_mu = kvectors @ dipoles.T  # -> [k, i]
+
+        S_re = jnp.sum(charges * c - k_mu * s, axis=-1)
+        S_im = jnp.sum(charges * s + k_mu * c, axis=-1)
+
+        a = G * S_re
+        b = G * S_im
+        phi = (a @ c + b @ s) / volume
+        field = (s.T * a - c.T * b) @ kvectors / volume
+
+        phi += potential.correction(smearing, charges, volume)
+        field += dipole_self_field(smearing) * dipoles
+
+        if pbc is not None:
+            n_hat, basis_len = slab_geometry(cell, pbc)
+            z = positions @ n_hat
+            mu_z = dipoles @ n_hat
+            charge_tot = jnp.sum(charges)
+            M_axis = jnp.sum(charges * z + mu_z)
+            M_axis_sq = jnp.sum(charges * z**2 + 2 * mu_z * z)
+
+            is_2d = jnp.sum(pbc) == 2
+            slab_phi = slab_energy_per_atom(z, M_axis, M_axis_sq, charge_tot, basis_len)
+            slab_field = slab_field_per_atom(z, M_axis, charge_tot)[:, None] * n_hat
+            phi += is_2d * slab_phi / volume
+            field += is_2d * slab_field / volume
+
+        return phi / 2, field / 2
+
+    return Solver(rspace, kspace)

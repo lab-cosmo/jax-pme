@@ -37,7 +37,7 @@ def compose_cell(batch):
     return jnp.where(batch.pbc[:, :, None], batch.cell, batch.effective_cell)
 
 
-def get_distances(cell, Ra, Rb, cell_shifts):
+def get_displacements(cell, Ra, Rb, cell_shifts):
     # we can't use mic: the unit tests use small cells
     R = Rb - Ra
     if len(cell.shape) == 2:
@@ -49,7 +49,11 @@ def get_distances(cell, Ra, Rb, cell_shifts):
     else:
         raise ValueError(f"cell shape {cell.shape} should be 3x3 or pairs x 3x3)")
 
-    return safe_norm(R, axis=-1)
+    return R
+
+
+def get_distances(cell, Ra, Rb, cell_shifts):
+    return safe_norm(get_displacements(cell, Ra, Rb, cell_shifts), axis=-1)
 
 
 def get_volume(cell):

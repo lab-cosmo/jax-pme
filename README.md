@@ -127,7 +127,30 @@ All three accept lists of `ase.Atoms` in `prepare` and handle padding/masking in
 - **`num_k` is required** on `prepare` and fixes the reciprocal grid (per-cell K target via `lr_wavelength_for_num_k`; the K axis stays rectangular so all systems share `K_pad`). The real-space `cutoff` follows it: omit it and it is derived as `lr_wavelength · 8` (with `smearing = lr_wavelength · 2`), matching `batched_mixed`, so real and reciprocal space stay balanced. An explicit `cutoff` overrides only the real-space radius (`smearing` still tracks `num_k`).
 - **Tile sizes `(BM, BK)` are fixed at prepare time** (defaults `BM=32, BK=128`). They drive both the per-system atom padding and the kernel tile dimensions.
 - Lower memory and faster on heterogeneous batches where system sizes vary by a lot (small molecules + larger crystals/MOFs in the same batch).
-- **Host-side batching is exposed for external pipelines**: `batched_tiled.batching.sample_shapes` gives the per-sample size accounting `get_batch` itself uses (for batch-size planners), and `get_batch(samples=[], dtype=...)` builds a pure-padding batch at explicit sizes; `int_dtype=` sets the neighbor-list index dtype (default int64).
+- **Host-side batching is exposed for external pipelines**: `batched_tiled.batching.sample_shapes` gives the per-sample size accounting `get_batch` itself uses (for batch-size planners), and `get_batch(samples=[], dtype=...)` builds a pure-padding batch at explicit sizes; `int_dtype=` sets the neighbor-list index dtype (default int64). `get_batch` returns `charges, dipoles, sr_batch, nonperiodic, periodic`; dipoles are laid out like charges (zeros when the `Atoms` carry no `"dipoles"` array).
+
+### Point dipoles
+
+**Warning: experimental, API subject to change.**
+
+`EwaldDipole` (serial) and `jaxpme.batched_tiled.EwaldDipole` compute electrostatics of point charges *and* point dipoles (Coulomb only, tin-foil boundary conditions, 3D/2D/0D like `Ewald`). Dipoles enter through the structure factor $S(\mathbf{k}) = \sum_j (q_j + i\,\mathbf{k}\cdot\boldsymbol{\mu}_j)\, e^{i\mathbf{k}\cdot\mathbf{r}_j}$, so charge–dipole cross terms are included.
+
+```python
+from jaxpme import EwaldDipole
+
+calculator = EwaldDipole(prefactor=1.0, exclusion_radius=None, full_neighbor_list=False)
+# dipoles: [N, 3]; None -> atoms.get_array("dipoles")
+inputs = calculator.prepare(atoms, charges, dipoles, cutoff)
+phi, field = calculator.potentials(*inputs)
+
+from jaxpme.batched_tiled import EwaldDipole
+
+calculator = EwaldDipole()  # dipoles from each atoms' "dipoles" array
+charges, dipoles, *batch = calculator.prepare(atoms_list, num_k)
+phi, field = calculator.potentials(charges, dipoles, *batch)
+```
+
+`potentials` returns per-atom potentials *and* fields, both in the halved convention of the charge-only calculators: `phi = Φ/2` and `field = E/2`, where Φ and E are the physical potential and electric field at each atom due to all other charges and dipoles. Hence `energy = Σ q φ - Σ μ·field`, `dE/dq = 2φ`, `dE/dμ = -2 field`. **The physical field (e.g. for induction, μ ← αE) is `2 * field`.** `energy_forces_stress` holds the dipoles fixed under strain, so the returned stress is not symmetric; if dipoles depend on the structure, differentiate the full model instead.
 
 ## Development
 

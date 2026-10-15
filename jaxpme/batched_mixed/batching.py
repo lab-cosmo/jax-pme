@@ -349,6 +349,10 @@ def to_structure(atoms, cutoff, dtype=np.float64):
     structure["positions"] = atoms.get_positions().astype(dtype)
     structure["atomic_numbers"] = atoms.get_atomic_numbers().astype(int)
     structure["charges"] = atoms.get_initial_charges().astype(dtype)
+    if atoms.has("dipoles"):
+        structure["dipoles"] = atoms.get_array("dipoles").astype(dtype)
+    else:
+        structure["dipoles"] = np.zeros((len(atoms), 3), dtype=dtype)
 
     if cutoff is None:
         # no neighbor list: caller handles real space without one (e.g. non-pbc

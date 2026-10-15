@@ -289,6 +289,73 @@ def test_higher_order_derivatives():
     assert np.all(np.isfinite(bec))
 
 
+# -- exclusion radius --
+
+
+def pair_with_exclusion(r, charges, dipoles, exclusion_radius=3.0):
+    atoms = Atoms("H2", positions=[[0, 0, 0], [r, 0, 0]], cell=20 * np.eye(3), pbc=True)
+    calculator = EwaldDipole(exclusion_radius=exclusion_radius)
+    inputs = calculator.prepare(
+        atoms, charges, dipoles, exclusion_radius, lr_wavelength=0.25, smearing=1.0
+    )
+    return calculator.energy_forces(*inputs)
+
+
+@pytest.mark.parametrize(
+    "charges, dipoles",
+    [
+        (np.zeros(2), np.array([[1.0, 0, 0], [1.0, 0, 0]])),  # ψ'' in the energy
+        (np.array([1.0, 0.0]), np.array([[0, 0, 0], [1.0, 0, 0]])),  # ψ'' in the force
+    ],
+)
+def test_exclusion_radius_continuity(charges, dipoles):
+    # the cutoff function is only C¹: differentiating it would put f_c''(R) ≠ 0
+    # into dipole energies and charge-dipole forces, so it must multiply the
+    # radial derivatives instead of being differentiated with them
+    h = 1e-6
+    (e_in, f_in), (e_out, f_out) = (
+        pair_with_exclusion(3.0 + d, charges, dipoles) for d in (-h, h)
+    )
+    np.testing.assert_allclose(e_in, e_out, atol=1e-5)
+    np.testing.assert_allclose(f_in, f_out, atol=1e-5)
+
+
+def test_exclusion_radius_matches_torch_pme_tensor():
+    # inside the exclusion radius the real-space dipole-dipole kernel is
+    # -f_c(r) T_lr(r), with T_lr the long-range (erf) dipole tensor in the
+    # B/C form of torch-pme's PotentialDipole.lr_from_dist
+    from jaxpme.potentials import potential
+    from jaxpme.solvers import _rspace_dipole
+
+    smearing, R = 1.0, 3.0
+    alpha = 1 / (2 * smearing**2)
+    rng = np.random.default_rng(0)
+    x = np.array([1.3, -0.7, 2.1])
+    r = np.linalg.norm(x)
+    mu = rng.normal(size=(2, 3))
+
+    from scipy.special import erfc
+
+    B1 = erfc(np.sqrt(alpha) * r) / r**3
+    B2 = 2 * np.sqrt(alpha / np.pi) * np.exp(-alpha * r**2) / r**2
+    B = 1 / r**3 - B1 - B2
+    C1 = 3 * erfc(np.sqrt(alpha) * r) / r**5
+    C2 = 2 * np.sqrt(alpha / np.pi) * (2 * alpha + 3 / r**2) * np.exp(-alpha * r**2) / r**2
+    C = 3 / r**5 - C1 - C2
+    T_lr = B * np.eye(3) - C * np.outer(x, x)
+    fc = 0.5 * (1 + np.cos(np.pi * r / R))
+    expected = -fc * mu[0] @ T_lr @ mu[1]
+
+    pot = potential(exponent=1, exclusion_radius=R)
+    # R = r_j - r_i for pair (i=0, j=1); half list, so the pair energy is
+    # Σ q φ - Σ μ·F over both atoms
+    phi, field = _rspace_dipole(
+        pot, smearing, np.zeros(2), mu, -x[None], np.array([0]), np.array([1])
+    )
+    energy = -np.sum(mu * np.asarray(field))
+    np.testing.assert_allclose(energy, expected, rtol=1e-12)
+
+
 # -- 2D slab --
 
 

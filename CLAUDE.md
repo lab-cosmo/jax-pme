@@ -6,8 +6,8 @@ JAX implementation of Ewald summation, PME, and P3M for long-range electrostatic
 ## Structure
 ```
 jaxpme/
-├── calculators.py      # Main API: Ewald(), PME(), P3M() factory functions
-├── solvers.py          # Real-space and reciprocal-space solvers (ewald, pme, p3m)
+├── calculators.py      # Main API: Ewald(), EwaldDipole(), PME(), P3M() factory functions
+├── solvers.py          # Real-space and reciprocal-space solvers (ewald, ewald_dipole, pme, p3m)
 ├── potentials.py       # Coulomb, inverse power-law, range-separated potentials
 ├── kspace.py           # K-space: numpy preprocessing (grids) + jax.numpy JIT ops (p3m_influence, kvectors)
 ├── mesh.py             # Mesh interpolation: lagrange() and bspline() (n=1-5)
@@ -18,12 +18,13 @@ jaxpme/
 │   ├── calculators.py  # batched_mixed.Ewald() — main batched API
 │   └── batching.py     # Batch preparation utilities
 └── batched_tiled/      # Batched Ewald with sum-padded atoms + (BM, BK) tile dispatch
-    ├── calculators.py  # batched_tiled.Ewald() — heterogeneous-batch backend
+    ├── calculators.py  # batched_tiled.Ewald(), .EwaldDipole() — heterogeneous-batch backend
     ├── batching.py     # Sum-padded layout + single (b, m_tile, k_tile) dispatch table;
     │                   # sample_shapes() (per-sample sizing for external planners),
     │                   # get_batch(samples=[], dtype=...) (pure-padding batches),
     │                   # int_dtype= (NL index dtype, default int64)
-    └── kernel.py       # phi_recip_xla_vmap: vmap + (segment_sum | reshape-sum) reciprocal kernel
+    └── kernel.py       # phi_recip_xla_vmap: vmap + (segment_sum | reshape-sum) reciprocal kernel;
+                        # optional `mu` adds dipoles to S(k) and returns fields too
 
 tests/
 ├── conftest.py         # REFERENCE_STRUCTURES_DIR constant
@@ -31,6 +32,7 @@ tests/
 ├── test_kspace.py      # K-space computation tests (half-space optimization, etc.)
 ├── test_inverse_power_law.py  # 1/r^p potentials: closed forms, direct-sum references
 ├── test_slab_correction.py  # 2D PBC: tiling, rotation, forces, MAD-1.5 references
+├── test_dipoles.py     # EwaldDipole: ESPResSo refs, analytic, charge-pair limit, slab
 ├── test_batched_*.py   # Batched implementation tests
 ```
 
@@ -50,7 +52,17 @@ Pinned by `tests/test_batched_tiled_kernel_memory.py` via `memory_analysis()`.
 ### Potential convention (matches torch-pme)
 `V_i = (1/2) Σ_{j≠i} q_j v(r_ij)` — the 1/2 is absorbed into the potential so `energy = Σ_i q_i V_i` (no extra 1/2). Both PBC and non-PBC paths (serial and batched) return this halved potential. If comparing against a textbook `V_i = Σ q_j/r_ij` reference, expect a factor of 2.
 
-### PME vs P3M
+### Point dipoles (`EwaldDipole`)
+- Serial `EwaldDipole` and `batched_tiled.EwaldDipole`; Coulomb only, tin-foil, 3D/2D/0D. Experimental; driven by the iris MLIP (charges + dipoles, a few non-SCF induction steps μ ← αE inside the model — no solver here)
+- Structure factor `S(k) = Σ (q + i k·μ) e^{ik·r}`; `potentials` returns `(φ, F)` with **F = E/2** (halved like φ): energy `Σqφ − Σμ·F`, `dE/dμ = −2F`. Physical field is `2F`
+- Real space: radial derivatives ψ′, ψ″ of the existing scalar `sr`/`real` kernels via nested jvp (`potentials.radial_derivatives`), contracted in `solvers._rspace_dipole`. Reuses `exclusion_radius` for free; keeps third-order AD (forces of a field-dependent model, BEC) cheap
+- Self field `+4β³/(3√π) μ` (β = 1/(√2σ), `potentials.dipole_self_field`) ↔ self energy `−2β³/(3√π)|μ|²`
+- Slab: `M_axis` gains Σμ_z and `M_axis_sq` gains 2Σμ_z z; field from `kspace.slab_field_per_atom` (−d/dz of `slab_energy_per_atom`)
+- Tiled kernel: `mu=None` keeps the charge-only path byte-identical; with `mu`, pass 1 adds one [BM,3]@[3,BK] matmul, pass 2 also returns the field (same trig)
+- Stress holds μ fixed → asymmetric (torque term); a model predicting μ owns ∂μ/∂ε
+- Not supported: PME/P3M, `batched_mixed`/`batched_flat`, custom/power-law potentials, quadrupoles (would add −½ k·Q·k to S(k)), precomputed `distances`
+
+## PME vs P3M
 - **PME**: Lagrange interpolation (4-node). Faster but forces less smooth.
 - **P3M**: B-spline interpolation (n=1-5) with influence function correction. Smoother forces, better for MD.
 

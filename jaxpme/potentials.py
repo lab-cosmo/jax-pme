@@ -89,6 +89,27 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
     return Potential(sr, lr, real, correction)
 
 
+def radial_derivatives(f):
+    # (f, f', f'') of an elementwise radial function, via nested jvp
+    def derivatives(r):
+        ones = jnp.ones_like(r)
+
+        def f_and_df(r):
+            return jax.jvp(f, (r,), (ones,))
+
+        (f0, f1), (_, f2) = jax.jvp(f_and_df, (r,), (ones,))
+        return f0, f1, f2
+
+    return derivatives
+
+
+def dipole_self_field(smearing):
+    # Gaussian dipole's own field at its centre is -4β³/(3√π) μ, β = 1/(√2σ);
+    # the k-space sum contains it, so this is added back
+    beta = 1 / (jnp.sqrt(2.0) * smearing)
+    return 4 * beta**3 / (3 * jnp.sqrt(jnp.pi))
+
+
 # -- low-level implementation of potentials --
 #
 # lr_k0 gives the k->0 limit of lr_k2 (used in place of the masked k=0 term);

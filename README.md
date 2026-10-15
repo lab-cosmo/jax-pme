@@ -139,7 +139,8 @@ All three accept lists of `ase.Atoms` in `prepare` and handle padding/masking in
 from jaxpme import EwaldDipole
 
 calculator = EwaldDipole(prefactor=1.0, exclusion_radius=None, full_neighbor_list=False)
-inputs = calculator.prepare(atoms, charges, dipoles, cutoff)  # dipoles: [N, 3]; None -> atoms.get_array("dipoles")
+# dipoles: [N, 3]; None -> atoms.get_array("dipoles")
+inputs = calculator.prepare(atoms, charges, dipoles, cutoff)
 phi, field = calculator.potentials(*inputs)
 
 from jaxpme.batched_tiled import EwaldDipole

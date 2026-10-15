@@ -93,6 +93,15 @@ def slab_energy_per_atom(z_i, M_axis, M_axis_sq, charge_tot, basis_len):
     )
 
 
+def slab_field_per_atom(z_i, M_axis, charge_tot):
+    """Field along n_hat from the slab correction; -d/dz of `slab_energy_per_atom`.
+
+    M_axis must include the dipoles' normal components. Same normalisation
+    as `slab_energy_per_atom` (caller applies `/ volume` and 2D-PBC gating).
+    """
+    return -(4.0 * jnp.pi) * (M_axis - charge_tot * z_i)
+
+
 def get_reciprocal(cell):
     # note: reciprocal is in rows (like cell)
     return jnp.linalg.inv(cell).T * 2 * jnp.pi

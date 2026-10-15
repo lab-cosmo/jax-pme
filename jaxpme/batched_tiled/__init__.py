@@ -7,6 +7,6 @@ required by `prepare` — it sets the per-cell K target via
 `lr_wavelength_for_num_k`, and the batcher max-pads to a common K_pad.
 """
 
-from .calculators import Ewald
+from .calculators import Ewald, EwaldDipole
 
-__all__ = ["Ewald"]
+__all__ = ["Ewald", "EwaldDipole"]

@@ -11,6 +11,12 @@ Pass 2 builds per-atom potentials:
 
     φ_i = Σ_k W_k [cos(k · r_i) · S^r_k + sin(k · r_i) · S^i_k]
 
+With point dipoles `mu`, the structure factor is S_k = Σ_j (q_j + i k·μ_j) e^{ik·r_j},
+which adds `-(k·μ_j) sin` to S^r and `(k·μ_j) cos` to S^i, and pass 2 also returns
+the field at the atoms (same trig, one extra [BM, BK] @ [BK, 3] per tile):
+
+    E_i = Σ_k W_k k [sin(k · r_i) · S^r_k - cos(k · r_i) · S^i_k]
+
 The dispatch table `dispatch_table [T, 3]` rows are `(b, m_tile, k_tile)`,
 ordered outer-m_tile / inner-k_tile. This enumerates the on-diagonal blocks
 of the block-diagonal atom×kvec work matrix (one block per (system, m_tile,
@@ -47,6 +53,7 @@ def phi_recip_xla_vmap(
     BM,
     BK,
     n_kvec_tiles,
+    mu=None,
 ):
     """Per-atom reciprocal Ewald potential on the sum-padded flat layout.
 
@@ -58,9 +65,11 @@ def phi_recip_xla_vmap(
       atom_off [B+1]              prefix sum over per-system padded atom counts
       dispatch_table [T, 3]       (b, m_tile, k_tile) triples, pass-2 ordered
       BM, BK, n_kvec_tiles        compile-time tile sizes / k-tile count
+      mu [N_total, 3] or None     flat dipoles (already masked)
 
     Returns:
       phi [N_total]               per-atom reciprocal potential (no 1/2 factor)
+      field [N_total, 3]          only if `mu` is given (no 1/2 factor)
     """
     dtype = r.dtype
     N_total = r.shape[0]
@@ -86,7 +95,15 @@ def phi_recip_xla_vmap(
         theta = rt @ kv.T
         c = jnp.cos(theta)
         s = jnp.sin(theta)
-        return ((qt[:, None] * c).sum(0), (qt[:, None] * s).sum(0))
+        if mu is None:
+            return ((qt[:, None] * c).sum(0), (qt[:, None] * s).sum(0))
+
+        mut = lax.dynamic_slice(mu, (a_offset, ZERO), (BM, 3))
+        k_mu = mut @ kv.T
+        return (
+            (qt[:, None] * c - k_mu * s).sum(0),
+            (qt[:, None] * s + k_mu * c).sum(0),
+        )
 
     Sr_per, Si_per = jax.vmap(per_triple1)(dispatch_table)  # [T, BK] each
 
@@ -114,11 +131,25 @@ def phi_recip_xla_vmap(
         theta = rt @ kv.T
         c = jnp.cos(theta)
         s = jnp.sin(theta)
-        return (c * (Wt * Sr_t)[None, :] + s * (Wt * Si_t)[None, :]).sum(1)
+        a = Wt * Sr_t
+        b = Wt * Si_t
+        phi = (c * a[None, :] + s * b[None, :]).sum(1)
+        if mu is None:
+            return phi
+        return phi, (s * a[None, :] - c * b[None, :]) @ kv
 
-    phi_per = jax.vmap(per_triple2)(dispatch_table)  # [T, BM]
     # Outer-m_tile / inner-k_tile ordering → each global m_tile is exactly
     # `n_kvec_tiles` consecutive rows. Reshape + sum, no segment_sum.
     M_TILES = N_total // BM
+    if mu is None:
+        phi_per = jax.vmap(per_triple2)(dispatch_table)  # [T, BM]
+        phi_grouped = phi_per.reshape(M_TILES, n_kvec_tiles, BM).sum(axis=1)
+        return phi_grouped.reshape(N_total).astype(dtype)
+
+    phi_per, field_per = jax.vmap(per_triple2)(dispatch_table)  # [T, BM], [T, BM, 3]
     phi_grouped = phi_per.reshape(M_TILES, n_kvec_tiles, BM).sum(axis=1)
-    return phi_grouped.reshape(N_total).astype(dtype)
+    field_grouped = field_per.reshape(M_TILES, n_kvec_tiles, BM, 3).sum(axis=1)
+    return (
+        phi_grouped.reshape(N_total).astype(dtype),
+        field_grouped.reshape(N_total, 3).astype(dtype),
+    )

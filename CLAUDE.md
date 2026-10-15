@@ -22,6 +22,7 @@ jaxpme/
     ├── batching.py     # Sum-padded layout + single (b, m_tile, k_tile) dispatch table;
     │                   # sample_shapes() (per-sample sizing for external planners),
     │                   # get_batch(samples=[], dtype=...) (pure-padding batches),
+    │                   # returns (charges, dipoles, sr, nonpbc, pbc); dipoles from atoms "dipoles" array
     │                   # int_dtype= (NL index dtype, default int64)
     └── kernel.py       # phi_recip_xla_vmap: vmap + (segment_sum | reshape-sum) reciprocal kernel;
                         # optional `mu` adds dipoles to S(k) and returns fields too

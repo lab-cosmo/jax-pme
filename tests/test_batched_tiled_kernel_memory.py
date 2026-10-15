@@ -30,8 +30,8 @@ def _tiled_case(cutoff=4.0, lr_div=16.0, BM=32, BK=128, dipoles=False):
     kwargs = dict(num_k=num_k, cutoff=cutoff, smearing=cutoff / 8, BM=BM, BK=BK)
     if dipoles:
         calculator = EwaldDipole(prefactor=1.0)
-        mu = np.random.default_rng(0).normal(size=(len(atoms), 3))
-        args = calculator.prepare([atoms], dipoles=[mu], **kwargs)
+        atoms.set_array("dipoles", np.random.default_rng(0).normal(size=(len(atoms), 3)))
+        args = calculator.prepare([atoms], **kwargs)
     else:
         calculator = Ewald(prefactor=1.0)
         args = calculator.prepare([atoms], **kwargs)

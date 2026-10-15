@@ -38,14 +38,13 @@ def structures():
     slab.set_initial_charges(charges - charges.mean())
 
     atomss = [*coulomb, dipolar, cluster, slab]
-    dipoles = [
-        dipolar.get_array("dipoles") if a is dipolar else rng.normal(size=(len(a), 3))
-        for a in atomss
-    ]
-    return atomss, dipoles
+    for atoms in atomss:
+        if atoms is not dipolar:
+            atoms.set_array("dipoles", rng.normal(size=(len(atoms), 3)))
+    return atomss
 
 
-def serial_reference(atoms, dipoles, cutoff, smearing):
+def serial_reference(atoms, cutoff, smearing):
     calculator = SerialEwaldDipole()
     pbc = atoms.get_pbc()
     if pbc.sum() == 2:
@@ -54,7 +53,7 @@ def serial_reference(atoms, dipoles, cutoff, smearing):
         atoms = atoms.copy()
         atoms.pbc = True
     inputs = calculator.prepare(
-        atoms, None, dipoles, cutoff, lr_wavelength=cutoff / 8, smearing=smearing
+        atoms, None, None, cutoff, lr_wavelength=cutoff / 8, smearing=smearing
     )
     inputs = (*inputs[:-1], pbc)
     phi, field = calculator.potentials(*inputs)
@@ -66,20 +65,20 @@ def serial_reference(atoms, dipoles, cutoff, smearing):
 def test_vs_serial(BM, BK):
     cutoff = 6.0
     smearing = 1.5
-    atomss, dipoles = structures()
+    atomss = structures()
     num_k = max(_num_k_for_lr(a, cutoff / 8) for a in atomss if a.get_pbc().all())
 
     calculator = EwaldDipole()
     inputs = calculator.prepare(
-        atomss, num_k, dipoles=dipoles, cutoff=cutoff, smearing=smearing, BM=BM, BK=BK
+        atomss, num_k, cutoff=cutoff, smearing=smearing, BM=BM, BK=BK
     )
     phi, field = calculator.potentials(*inputs)
     energy, forces, stress = calculator.energy_forces_stress(*inputs)
     atom_to_structure = inputs[2].atom_to_structure
 
-    for b, (atoms, mu) in enumerate(zip(atomss, dipoles)):
+    for b, atoms in enumerate(atomss):
         ref_phi, ref_field, ref_energy, ref_forces, ref_stress = serial_reference(
-            atoms, mu, cutoff, smearing
+            atoms, cutoff, smearing
         )
         sel = atom_to_structure == b
         # the slab differs by the vacuum shrink (residual ~ exp(-3π))
@@ -94,9 +93,9 @@ def test_vs_serial(BM, BK):
 
 
 def test_halved_convention():
-    atomss, dipoles = structures()
+    atomss = structures()
     calculator = EwaldDipole()
-    charges, flat_dipoles, *batch = calculator.prepare(atomss, 2000, dipoles=dipoles)
+    charges, flat_dipoles, *batch = calculator.prepare(atomss, 2000)
 
     phi, field = calculator.potentials(charges, flat_dipoles, *batch)
     dq, dmu = jax.grad(
@@ -108,9 +107,9 @@ def test_halved_convention():
 
 
 def test_higher_order_derivatives():
-    atomss, dipoles = structures()
+    atomss = structures()
     calculator = EwaldDipole()
-    charges, flat_dipoles, batch, *rest = calculator.prepare(atomss, 1000, dipoles=dipoles)
+    charges, flat_dipoles, batch, *rest = calculator.prepare(atomss, 1000)
 
     def energy(positions, external_field):
         b = batch._replace(positions=positions)
@@ -128,9 +127,9 @@ def test_stress_is_strain_derivative():
     # stress[a, b] = ∂E/∂ε_ab per structure for r_ib -> r_ib + ε_ab r_ia (same for the
     # cell rows), dipoles held fixed. For 2D the non-periodic row has no cell term
     # by design (see jaxpme.utils.compose_cell), consistent with straining `batch.cell`
-    atomss, dipoles = structures()
+    atomss = structures()
     calculator = EwaldDipole()
-    charges, flat_dipoles, batch, *rest = calculator.prepare(atomss, 1000, dipoles=dipoles)
+    charges, flat_dipoles, batch, *rest = calculator.prepare(atomss, 1000)
     _, _, stress = calculator.energy_forces_stress(charges, flat_dipoles, batch, *rest)
 
     def strained_energies(eps):

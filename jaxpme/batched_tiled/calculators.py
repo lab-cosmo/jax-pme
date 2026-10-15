@@ -7,7 +7,6 @@ Same API surface as `jaxpme.batched_mixed.calculators.Ewald`: returns a
 `batching.get_batch`.
 """
 
-import numpy as np
 import jax
 import jax.numpy as jnp
 
@@ -321,7 +320,7 @@ def Ewald(
         # `batching.prepare`
         from .batching import get_batch, prepare
 
-        return get_batch(
+        charges, _, *batch = get_batch(
             [
                 prepare(
                     atoms,
@@ -335,6 +334,7 @@ def Ewald(
             BM=BM,
             BK=BK,
         )
+        return charges, *batch
 
     return Calculator(
         prepare_fn,
@@ -512,11 +512,12 @@ def EwaldDipole(prefactor=1.0, halfspace=True):
         ) * batch.structure_mask[:, None, None]
         return energy, forces, stress
 
-    def prepare_fn(atomss, num_k, dipoles=None, cutoff=None, smearing=None, BM=32, BK=128):
-        # `dipoles`: list of [N_b, 3] arrays; defaults to each atoms' "dipoles" array
+    def prepare_fn(atomss, num_k, cutoff=None, smearing=None, BM=32, BK=128):
+        # dipoles come from each atoms' "dipoles" array, like charges from
+        # get_initial_charges
         from .batching import get_batch, prepare
 
-        charges, batch, batch_nopbc, batch_pbc = get_batch(
+        return get_batch(
             [
                 prepare(
                     atoms,
@@ -530,14 +531,6 @@ def EwaldDipole(prefactor=1.0, halfspace=True):
             BM=BM,
             BK=BK,
         )
-
-        if dipoles is None:
-            dipoles = [atoms.get_array("dipoles") for atoms in atomss]
-        # atoms are laid out contiguously in input order, like positions
-        flat = np.zeros_like(batch.positions)
-        flat[: sum(len(atoms) for atoms in atomss)] = np.concatenate(dipoles)
-
-        return charges, flat, batch, batch_nopbc, batch_pbc
 
     return Calculator(
         prepare_fn,

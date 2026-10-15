@@ -199,8 +199,9 @@ def get_batch(
             raise ValueError("empty `samples` requires an explicit `dtype`")
         dtype = samples[0]["positions"].dtype
 
-    # sr_batch arrays
+    # sr_batch arrays; charges and dipoles are returned separately (model outputs)
     charges = np.zeros(n_atoms, dtype=dtype)
+    dipoles = np.zeros((n_atoms, 3), dtype=dtype)
     positions = np.zeros((n_atoms, 3), dtype=dtype)
     cell = np.zeros((n_structures, 3, 3), dtype=dtype)
     cell[:] = np.eye(3)
@@ -252,6 +253,7 @@ def get_batch(
         pair_slice = slice(pair_offset, pair_offset + num_p)
 
         charges[atom_slice] = structure["charges"]
+        dipoles[atom_slice] = structure["dipoles"]
         positions[atom_slice] = structure["positions"]
         cell[idx] = structure["cell"]
         effective_cell[idx] = structure.get("effective_cell", structure["cell"])
@@ -339,7 +341,7 @@ def get_batch(
         pair_mask=nonpbc_pair_mask,
     )
 
-    return charges, sr_batch, nonperiodic_batch, periodic_batch
+    return charges, dipoles, sr_batch, nonperiodic_batch, periodic_batch
 
 
 def prepare(atoms, num_k, cutoff=None, smearing=None, halfspace=True, dtype=np.float64):

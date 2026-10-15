@@ -56,7 +56,7 @@ Pinned by `tests/test_batched_tiled_kernel_memory.py` via `memory_analysis()`.
 ### Point dipoles (`EwaldDipole`)
 - Serial `EwaldDipole` and `batched_tiled.EwaldDipole`; Coulomb only, tin-foil, 3D/2D/0D. Experimental; driven by the iris MLIP (charges + dipoles, a few non-SCF induction steps μ ← αE inside the model — no solver here)
 - Structure factor `S(k) = Σ (q + i k·μ) e^{ik·r}`; `potentials` returns `(φ, F)` with **F = E/2** (halved like φ): energy `Σqφ − Σμ·F`, `dE/dμ = −2F`. Physical field is `2F`
-- Real space: radial derivatives ψ′, ψ″ of the existing scalar `sr`/`real` kernels via nested jvp (`potentials.radial_derivatives`), contracted in `solvers._rspace_dipole`. Reuses `exclusion_radius` for free; keeps third-order AD (forces of a field-dependent model, BEC) cheap
+- Real space: radial derivatives ψ′, ψ″ of the scalar kernel via nested jvp (`Potential.sr_derivatives`), contracted in `solvers._rspace_dipole`; keeps third-order AD (forces of a field-dependent model, BEC) cheap. With `exclusion_radius` the cutoff multiplies ψ, ψ′, ψ″ *after* differentiation (torch-pme convention): differentiating f_c would leak f_c″(R) ≠ 0 into dipole energies and charge–dipole forces and make them jump at R
 - Self field `+4β³/(3√π) μ` (β = 1/(√2σ), `potentials.dipole_self_field`) ↔ self energy `−2β³/(3√π)|μ|²`
 - Slab: `M_axis` gains Σμ_z and `M_axis_sq` gains 2Σμ_z z; field from `kspace.slab_field_per_atom` (−d/dz of `slab_energy_per_atom`)
 - Tiled kernel: `mu=None` keeps the charge-only path byte-identical; with `mu`, pass 1 adds one [BM,3]@[3,BK] matmul, pass 2 also returns the field (same trig)

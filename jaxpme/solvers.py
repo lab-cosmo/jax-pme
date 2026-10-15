@@ -159,18 +159,12 @@ def ewald(potential, full_neighbor_list=False, halfspace=False):
 def _rspace_dipole(
     potential, smearing, charges, dipoles, R, i, j, full_neighbor_list=False
 ):
-    from .potentials import radial_derivatives
     from .utils import safe_norm
 
     N = charges.shape[0]
 
-    if smearing is None:
-        f = potential.real
-    else:
-        f = partial(potential.sr, smearing)
-
     r = safe_norm(R, axis=-1)
-    psi, d1, d2 = radial_derivatives(f)(r)
+    psi, d1, d2 = potential.sr_derivatives(smearing, r)
 
     # x_hat points from the source j to the target i
     r_safe = jnp.where(r == 0.0, 1.0, r)

@@ -11,7 +11,7 @@ jaxpme/
 ├── potentials.py       # Coulomb, inverse power-law, range-separated potentials
 ├── kspace.py           # K-space: numpy preprocessing (grids) + jax.numpy JIT ops (p3m_influence, kvectors)
 ├── mesh.py             # Mesh interpolation: lagrange() and bspline() (n=1-5)
-├── utils.py            # Neighbor lists, cell handling
+├── utils.py            # Neighbor lists, cell handling, sorted pair gathers/reductions
 ├── prefactors.py       # Unit conversion constants (eV_A, etc.)
 ├── batched_flat/       # Batched Ewald (flat padding strategy)
 ├── batched_mixed/      # Batched Ewald (mixed real/reciprocal batching)
@@ -46,6 +46,9 @@ gather materialising the full trailing axis *per work tile* (`[T, K_pad, 3]`),
 which is exactly the matrix the tiling exists to avoid. XLA fuses it away at
 small sizes and gives up as `T · K_pad` grows, so the cost appears suddenly.
 Pinned by `tests/test_batched_tiled_kernel_memory.py` via `memory_analysis()`.
+
+### batched_tiled pair layout (issue #37)
+A gather `x[idx]` transposes to a scatter-add under reverse AD, and on GPU a scatter-add with many pairs per atom serialises (66 M pairs at ~1500 neighbours: 10 s forces vs 15 ms forward). `batched_tiled` batches therefore carry a layout contract: `centers` and `pair_to_structure` sorted, `others[others_perm]` sorted (`Batch.others_perm`, `NonPeriodic.others_perm`; non-PBC pairs are stored with the roles of `to_lr`'s lists swapped so that centers are the sorted side). The real-space code uses `utils.take_sorted`, `take_permuted`, `segment_sum_sorted`, `segment_sum_permuted`, built on three linear primitives (`gather_sorted` ↔ `segment_sum_sorted`, `permute`) that transpose into each other with `indices_are_sorted`/`unique_indices` intact. Plain `jax.ops.segment_sum(indices_are_sorted=True)` is not enough: JAX's scatter-add transpose drops the flag, so the second transpose (force training) is a contended scatter again. No `custom_vjp` anywhere, so `jacfwd(grad(E))` works. Pinned on the lowered StableHLO by `tests/test_pair_layout.py::test_pair_scatters_are_sorted_or_unique`. Serial calculators and `batched_mixed` still use plain gathers (`j_perm=None` in `solvers._rspace`); they can adopt it by passing a perm.
 
 ### Potential convention (matches torch-pme)
 `V_i = (1/2) Σ_{j≠i} q_j v(r_ij)` — the 1/2 is absorbed into the potential so `energy = Σ_i q_i V_i` (no extra 1/2). Both PBC and non-PBC paths (serial and batched) return this halved potential. If comparing against a textbook `V_i = Σ q_j/r_ij` reference, expect a factor of 2.

@@ -47,7 +47,7 @@ def Ewald(
         exclusion_radius=None,
         custom_potential=custom_potential,
     )
-    solver = ewald(pot, full_neighbor_list=True, halfspace=halfspace)
+    solver = ewald(pot, full_neighbor_list=False, halfspace=halfspace)
     g_factor = 2 if halfspace else 1
 
     # raw potential for correction-side dispatch (Coulomb gets 2D slab,

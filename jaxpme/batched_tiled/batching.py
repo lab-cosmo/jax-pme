@@ -17,6 +17,9 @@ lets pass 2 collapse to `reshape + sum(axis=1)` instead of `segment_sum`; pass
 `Batch` and `NonPeriodic` are re-imported from `batched_mixed.batching`; only
 the `Periodic` layout differs.
 
+Periodic pairs are a half neighbour list (each pair once, from
+`to_structure(..., full_list=False)`); the calculator sums both directions.
+
 Pair layout contract (both `Batch` and `NonPeriodic`): `centers` is sorted and
 `others[others_perm]` is sorted, padding pairs included (they sit at the end
 and point at the padding atom, the largest index). The calculator relies on it
@@ -397,7 +400,7 @@ def prepare(atoms, num_k, cutoff=None, smearing=None, halfspace=True, dtype=np.f
             cutoff = lr_wavelength * 8.0
         if smearing is None:
             smearing = lr_wavelength * 2.0
-        structure = to_structure(atoms, cutoff, dtype=dtype)
+        structure = to_structure(atoms, cutoff, dtype=dtype, full_list=False)
     else:
         # non-pbc real space is the bare 1/r sum over *all* pairs (built in
         # to_lr), so the cutoff neighbor list would only be masked off here.

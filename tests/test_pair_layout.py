@@ -39,9 +39,12 @@ def test_vesin_lists_are_centre_sorted():
     from jaxpme.batched_mixed.batching import to_structure
 
     for atoms in structures():
-        s = to_structure(atoms, CUTOFF)
-        assert len(s["centers"]) > 0
-        assert_sorted(s["centers"])
+        full = to_structure(atoms, CUTOFF)
+        half = to_structure(atoms, CUTOFF, full_list=False)
+        assert len(half["centers"]) > 0
+        assert 2 * len(half["centers"]) == len(full["centers"])
+        assert_sorted(full["centers"])
+        assert_sorted(half["centers"])
 
 
 def test_get_batch_pair_layout():
@@ -125,7 +128,7 @@ def test_higher_order_matches_unsorted():
 
 @pytest.mark.parametrize("full_neighbor_list", [True, False])
 @pytest.mark.parametrize("exclusion_radius", [None, 3.0])
-def test_rspace_matches_unsorted(full_neighbor_list, exclusion_radius):
+def test_rspace_matches_full_unsorted(full_neighbor_list, exclusion_radius):
     import vesin
 
     from jaxpme.potentials import potential
@@ -133,25 +136,28 @@ def test_rspace_matches_unsorted(full_neighbor_list, exclusion_radius):
     from jaxpme.utils import get_distances
 
     atoms = structures()[1]
-    nl = vesin.NeighborList(cutoff=CUTOFF, full_list=full_neighbor_list, sorted=True)
-    i, j, S = nl.compute(atoms.positions, atoms.cell.array, True, quantities="ijS")
-    perm = np.argsort(j, kind="stable")
     pot = potential(exclusion_radius=exclusion_radius)
     charges = jnp.asarray(atoms.get_initial_charges())
     cell = jnp.asarray(atoms.cell.array)
-
-    def energy(positions, charges, j_perm):
-        r = get_distances(cell, positions[i], positions[j], S)
-        V = _rspace(pot, 1.0, charges, r, i, j, full_neighbor_list, j_perm=j_perm)
-        return jnp.sum(charges * V)
-
     positions = jnp.asarray(atoms.positions)
-    e, (dr, dq) = jax.value_and_grad(energy, argnums=(0, 1))(positions, charges, perm)
-    e_ref, (dr_ref, dq_ref) = jax.value_and_grad(energy, argnums=(0, 1))(
-        positions, charges, None
-    )
-    for a, b in ((e, e_ref), (dr, dr_ref), (dq, dq_ref)):
-        np.testing.assert_allclose(a, b, atol=1e-12, rtol=1e-12)
+
+    def value_and_grads(full_list, sorted_layout):
+        nl = vesin.NeighborList(cutoff=CUTOFF, full_list=full_list, sorted=True)
+        i, j, S = nl.compute(atoms.positions, atoms.cell.array, True, quantities="ijS")
+        j_perm = np.argsort(j, kind="stable") if sorted_layout else None
+
+        def energy(positions, charges):
+            r = get_distances(cell, positions[i], positions[j], S)
+            V = _rspace(pot, 1.0, charges, r, i, j, full_list, j_perm=j_perm)
+            return jnp.sum(charges * V)
+
+        e, (dr, dq) = jax.value_and_grad(energy, argnums=(0, 1))(positions, charges)
+        return e, dr, dq
+
+    reference = value_and_grads(full_list=True, sorted_layout=False)
+    for sorted_layout in (True, False):
+        for a, b in zip(value_and_grads(full_neighbor_list, sorted_layout), reference):
+            np.testing.assert_allclose(a, b, atol=1e-12, rtol=1e-12)
 
 
 def test_pair_scatters_are_sorted_or_unique():

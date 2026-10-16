@@ -22,8 +22,9 @@ Batch = namedtuple(
         "pair_to_structure",
         "effective_cell",  # see jaxpme.utils.compose_cell
         "pbc",
+        "others_perm",  # see jaxpme.batched_tiled.batching (pair layout)
     ),
-    defaults=(None, None),
+    defaults=(None, None, None),
 )
 Periodic = namedtuple(
     "Periodic",
@@ -42,7 +43,9 @@ Periodic = namedtuple(
     # structure_mask: mask for valid periodic structures [num_pbc]
     #              -> True for real structures, False for padding
 )
-NonPeriodic = namedtuple("NonPeriodic", ("centers", "others", "pair_mask"))
+NonPeriodic = namedtuple(
+    "NonPeriodic", ("centers", "others", "pair_mask", "others_perm"), defaults=(None,)
+)
 
 
 def get_batch(
@@ -341,8 +344,13 @@ def to_lr(structure, lr_wavelength, smearing, halfspace=True):
         raise ValueError(f"we support 3D, 2D, or no pbc. got {pbc}")
 
 
-def to_structure(atoms, cutoff, dtype=np.float64):
-    from vesin import ase_neighbor_list as neighbor_list
+def to_structure(atoms, cutoff, dtype=np.float64, full_list=True):
+    from vesin import NeighborList
+
+    def neighbor_list(quantities, atoms, cutoff):
+        # centre-sorted either way (batched_tiled relies on it)
+        nl = NeighborList(cutoff=cutoff, full_list=full_list, sorted=True)
+        return nl.compute(atoms.positions, atoms.cell[:], atoms.pbc, quantities)
 
     structure = {}
     structure["cell"] = atoms.get_cell().array.astype(dtype)

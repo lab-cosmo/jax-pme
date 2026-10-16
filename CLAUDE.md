@@ -11,7 +11,7 @@ jaxpme/
 ├── potentials.py       # Coulomb, inverse power-law, range-separated potentials
 ├── kspace.py           # K-space: numpy preprocessing (grids) + jax.numpy JIT ops (p3m_influence, kvectors)
 ├── mesh.py             # Mesh interpolation: lagrange() and bspline() (n=1-5)
-├── utils.py            # Neighbor lists, cell handling
+├── utils.py            # Neighbor lists, cell handling, sorted pair gathers/reductions
 ├── prefactors.py       # Unit conversion constants (eV_A, etc.)
 ├── batched_flat/       # Batched Ewald (flat padding strategy)
 ├── batched_mixed/      # Batched Ewald (mixed real/reciprocal batching)
@@ -47,6 +47,9 @@ which is exactly the matrix the tiling exists to avoid. XLA fuses it away at
 small sizes and gives up as `T · K_pad` grows, so the cost appears suddenly.
 Pinned by `tests/test_batched_tiled_kernel_memory.py` via `memory_analysis()`.
 
+### batched_tiled pair layout
+`batched_tiled` uses a half neighbour list (`to_structure(..., full_list=False)`; `_rspace` with `full_neighbor_list=False`) in a sorted layout: `centers` and `pair_to_structure` sorted, `others[others_perm]` sorted (`Batch.others_perm`, `NonPeriodic.others_perm`), padding pairs last on the padding atom. Non-PBC pairs swap the roles of `to_lr`'s lists so that centers are the sorted side. `get_batch` enforces centre sortedness and builds `others_perm` (cached per sample by `prepare`). The real-space code uses `utils.take_sorted`, `take_permuted`, `segment_sum_sorted` and `segment_sum_permuted`, built on three linear primitives (`gather_sorted` ↔ `segment_sum_sorted`, `permute`) that transpose into each other with `indices_are_sorted`/`unique_indices` kept. They exist because a gather transposes to a scatter-add, XLA runs scatter-adds with atomics unless the indices are flagged sorted or unique, and JAX's own scatter-add transpose drops `indices_are_sorted`, so plain flags are lost at second order. No `custom_vjp`, so forward-over-reverse works. `tests/test_pair_layout.py::test_pair_scatters_are_sorted_or_unique` checks the lowered StableHLO. Serial calculators and `batched_mixed` use plain gathers (`j_perm=None`) and full or user-supplied lists.
+
 ### Potential convention (matches torch-pme)
 `V_i = (1/2) Σ_{j≠i} q_j v(r_ij)` — the 1/2 is absorbed into the potential so `energy = Σ_i q_i V_i` (no extra 1/2). Both PBC and non-PBC paths (serial and batched) return this halved potential. If comparing against a textbook `V_i = Σ q_j/r_ij` reference, expect a factor of 2.
 
@@ -75,7 +78,7 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
 - `batched_tiled.prepare` requires `num_k` and has no cutoff-only path (unlike `batched_mixed`)
 
 ## Inverse power-law potentials (1/r^p)
-- Integer exponents 1-6 supported (issue #20, ported from torch-pme):
+- Integer exponents 1-6 supported (ported from torch-pme):
   the k-space kernel Γ(peff, x)/x^peff with peff = (3-p)/2 uses closed forms
   per exponent, since generic `gammaincc` only handles peff > 0 (p < 3)
 - For p > 3 the kernel has a finite k→0 limit, supplied via the optional

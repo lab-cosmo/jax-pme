@@ -126,6 +126,8 @@ The dispatch table has **shape `[T, 3]`** that depends only on the bucket-rounde
 
 7. **2D-PBC stress is periodic-block only.** `compose_cell` drops the cell gradient on the non-periodic lattice vector (the vacuum shrink is a convergence trick, and its gradient is an artifact), so the `cell · ∂E/∂cell` term contributes nothing along that axis while the per-atom term still does. Treat the components touching the non-periodic direction as meaningless; the in-plane block is correct.
 
+8. **Pair layout: half list, sorted centers, `others` sorted through `others_perm`.** Periodic pairs are a half neighbour list (each pair once; the calculator sums both directions). `get_batch` requires each sample's pairs sorted by center, as `prepare`'s vesin list is, and raises otherwise. It stores `Batch.others_perm` and `NonPeriodic.others_perm` such that `others[others_perm]` is sorted; padding pairs come last and point at the padding atom. With this layout every real-space gather and reduction is a sorted or permutation op, which keeps forces and higher derivatives cheap on GPU (see `jaxpme.utils`). A hand-built batch with `others_perm=None` uses plain gathers instead.
+
 ## Padding strategy
 
 `next_size` buckets every padded dimension to powers of 2 by default for JIT cache stability. Override via `get_batch()` kwargs: `num_atoms_pbc="powers_of_2"`, etc. K_pad is then snapped up to a multiple of BK; N_pbc_total is snapped up to a multiple of BM. Slack in the atom total is absorbed by the last (padding) pbc-system.

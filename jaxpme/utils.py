@@ -1,6 +1,8 @@
 import jax
 import jax.numpy as jnp
 
+from functools import partial
+
 
 def atoms_to_graph(atoms, cutoff, full_list=False):
     import vesin
@@ -50,6 +52,111 @@ def get_distances(cell, Ra, Rb, cell_shifts):
         raise ValueError(f"cell shape {cell.shape} should be 3x3 or pairs x 3x3)")
 
     return safe_norm(R, axis=-1)
+
+
+# Pair gathers and reductions for a sorted pair layout: `centers` sorted,
+# `others[others_perm]` sorted, padding pairs last on the padding atom.
+#
+# Under reverse-mode AD a gather transposes to a scatter-add, which XLA executes
+# with atomic adds that serialise on repeated indices, unless the indices are
+# flagged sorted or unique.
+# The flags alone do not survive: JAX transposes a scatter-add into a gather
+# without `indices_are_sorted`, so a second transpose yields an unflagged
+# scatter-add. The three linear primitives below transpose into each other with
+# the flags kept -- sorted gather <-> sorted segment sum, permutation <->
+# inverse permutation -- and are closed under jvp, transpose and vmap. There is
+# no custom_vjp, so forward-over-reverse differentiation works.
+
+
+def _linear_primitive(name, impl, shape, transpose, n_idx):
+    from jax.extend.core import Primitive
+    from jax.interpreters import ad, batching, mlir
+
+    p = Primitive(name)
+    p.def_impl(impl)
+    p.def_abstract_eval(
+        lambda x, *idx, **kw: jax.core.ShapedArray(shape(x, *idx, **kw), x.dtype)
+    )
+    mlir.register_lowering(p, mlir.lower_fun(impl, multiple_results=False))
+    ad.defjvp(p, lambda t, x, *idx, **kw: p.bind(t, *idx, **kw), *[None] * n_idx)
+
+    def transpose_rule(ct, x, *idx, **kw):
+        if type(ct) is ad.Zero:
+            return [ad.Zero(x.aval)] + [None] * n_idx
+        return [transpose(ct, x.aval, *idx, **kw)] + [None] * n_idx
+
+    def batch_rule(args, dims, **kw):
+        if any(d is not None for d in dims[1:]):
+            return jax.vmap(partial(impl, **kw), in_axes=dims)(*args), 0
+        x, *idx = args
+        return p.bind(jnp.moveaxis(x, dims[0], 1), *idx, **kw), 1
+
+    ad.primitive_transposes[p] = transpose_rule
+    batching.primitive_batchers[p] = batch_rule
+    return p
+
+
+def _gather_sorted(x, idx):
+    return x.at[idx].get(indices_are_sorted=True, mode="promise_in_bounds")
+
+
+def _segment_sum_sorted(x, idx, num_segments):
+    return jax.ops.segment_sum(x, idx, num_segments, indices_are_sorted=True)
+
+
+def _permute(x, perm, inv):
+    return x.at[perm].get(unique_indices=True, mode="promise_in_bounds")
+
+
+gather_sorted_p = _linear_primitive(
+    "gather_sorted",
+    _gather_sorted,
+    lambda x, idx: idx.shape + x.shape[1:],
+    lambda ct, x, idx: segment_sum_sorted_p.bind(ct, idx, num_segments=x.shape[0]),
+    1,
+)
+segment_sum_sorted_p = _linear_primitive(
+    "segment_sum_sorted",
+    _segment_sum_sorted,
+    lambda x, idx, num_segments: (num_segments,) + x.shape[1:],
+    lambda ct, x, idx, num_segments: gather_sorted_p.bind(ct, idx),
+    1,
+)
+permute_p = _linear_primitive(
+    "permute",
+    _permute,
+    lambda x, perm, inv: x.shape,
+    lambda ct, x, perm, inv: permute_p.bind(ct, inv, perm),
+    2,
+)
+
+
+def take_sorted(x, idx):
+    return gather_sorted_p.bind(jnp.asarray(x), jnp.asarray(idx))
+
+
+def segment_sum_sorted(x, idx, num_segments):
+    return segment_sum_sorted_p.bind(
+        jnp.asarray(x), jnp.asarray(idx), num_segments=num_segments
+    )
+
+
+def _inverse(perm):
+    perm = jnp.asarray(perm)
+    arange = jnp.arange(perm.shape[0], dtype=perm.dtype)
+    return perm, jnp.zeros_like(perm).at[perm].set(arange, unique_indices=True)
+
+
+def take_permuted(x, idx, perm):
+    # x[idx] = x[idx[perm]][inverse(perm)]
+    perm, inv = _inverse(perm)
+    return permute_p.bind(take_sorted(x, jnp.asarray(idx)[perm]), inv, perm)
+
+
+def segment_sum_permuted(x, idx, perm, num_segments):
+    perm, inv = _inverse(perm)
+    x = permute_p.bind(jnp.asarray(x), perm, inv)
+    return segment_sum_sorted(x, jnp.asarray(idx)[perm], num_segments)
 
 
 def get_volume(cell):

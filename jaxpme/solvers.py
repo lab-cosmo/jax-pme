@@ -4,6 +4,8 @@ import jax.numpy as jnp
 from collections import namedtuple
 from functools import partial
 
+from .utils import segment_sum_permuted, segment_sum_sorted, take_permuted, take_sorted
+
 # solvers: actual method implementations
 #
 # This is the core of the package: We implement the actual methods that are
@@ -20,7 +22,8 @@ Solver = namedtuple("Solver", ("rspace", "kspace"))
 
 
 # -- shared real-space part --
-def _rspace(potential, smearing, charges, r, i, j, full_neighbor_list=False):
+def _rspace(potential, smearing, charges, r, i, j, full_neighbor_list=False, j_perm=None):
+    # j_perm given: i is sorted and j[j_perm] is sorted, see utils.take_sorted
     N = charges.shape[0]
 
     if smearing is None:
@@ -29,11 +32,19 @@ def _rspace(potential, smearing, charges, r, i, j, full_neighbor_list=False):
     else:
         potentials_bare = potential.sr(smearing, r)
 
-    pot = jax.ops.segment_sum(charges[j] * potentials_bare, i, num_segments=N)
+    if j_perm is None:
+        pot = jax.ops.segment_sum(charges[j] * potentials_bare, i, num_segments=N)
+    else:
+        q_j = take_permuted(charges, j, j_perm)
+        pot = segment_sum_sorted(q_j * potentials_bare, i, N)
 
     if not full_neighbor_list:
         # "reverse" pairs
-        pot += jax.ops.segment_sum(charges[i] * potentials_bare, j, num_segments=N)
+        if j_perm is None:
+            pot += jax.ops.segment_sum(charges[i] * potentials_bare, j, num_segments=N)
+        else:
+            q_i = take_sorted(charges, i)
+            pot += segment_sum_permuted(q_i * potentials_bare, j, j_perm, N)
 
     pot /= 2
 

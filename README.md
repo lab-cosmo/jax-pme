@@ -128,6 +128,7 @@ All three accept lists of `ase.Atoms` in `prepare` and handle padding/masking in
 - **Tile sizes `(BM, BK)` are fixed at prepare time** (defaults `BM=32, BK=128`). They drive both the per-system atom padding and the kernel tile dimensions.
 - Lower memory and faster on heterogeneous batches where system sizes vary by a lot (small molecules + larger crystals/MOFs in the same batch).
 - **Host-side batching is exposed for external pipelines**: `batched_tiled.batching.sample_shapes` gives the per-sample size accounting `get_batch` itself uses (for batch-size planners), and `get_batch(samples=[], dtype=...)` builds a pure-padding batch at explicit sizes; `int_dtype=` sets the neighbor-list index dtype (default int64).
+- **Half neighbour list with a sorted pair layout**: pairs are sorted by center and `others_perm` sorts the other side, so the real-space gathers and reductions stay cheap on GPU under any order of differentiation (forces, force training, `jacfwd` of forces). Samples passed to `get_batch` must have a half list sorted by center, as `prepare` produces them; a hand-built `Batch` with `others_perm=None` uses plain gathers. See `jaxpme/batched_tiled/README.md`.
 
 ## Development
 

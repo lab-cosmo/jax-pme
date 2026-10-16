@@ -1,5 +1,6 @@
-"""Sorted pair layout (issue #37): contract on the batch, and that the sorted
-gathers/reductions reproduce the plain ones at every derivative order."""
+"""The batched_tiled pair layout: the contract on prepared batches, and that the
+sorted gathers and reductions give the same values and derivatives as plain
+indexing."""
 
 import numpy as np
 import jax
@@ -36,6 +37,9 @@ def assert_sorted(x):
 
 
 def test_vesin_lists_are_centre_sorted():
+    """vesin's sorted lists are centre-sorted, and the half list holds exactly
+    half the pairs of the full one: `get_batch` and the half-list calculator
+    rely on both."""
     from jaxpme.batched_mixed.batching import to_structure
 
     for atoms in structures():
@@ -48,6 +52,8 @@ def test_vesin_lists_are_centre_sorted():
 
 
 def test_get_batch_pair_layout():
+    """`get_batch` output satisfies the layout contract for periodic and
+    non-periodic pairs, padding included; the sorted ops assume it unchecked."""
     from jaxpme.batched_tiled import Ewald
 
     charges, batch, nopbc, _ = Ewald().prepare(structures(), num_k=NUM_K, cutoff=CUTOFF)
@@ -65,6 +71,7 @@ def test_get_batch_pair_layout():
 
 
 def test_get_batch_rejects_unsorted_centers():
+    """Unsorted input fails loudly instead of giving wrong sums on GPU."""
     from jaxpme.batched_tiled.batching import get_batch, prepare
 
     s = prepare(structures()[0], num_k=NUM_K, cutoff=CUTOFF)
@@ -76,6 +83,8 @@ def test_get_batch_rejects_unsorted_centers():
 
 @pytest.mark.parametrize("exponent", [1, 3, 6])
 def test_matches_unsorted(exponent):
+    """Sorted layout and plain-gather fallback agree on everything the
+    calculator returns, for every potential family and boundary condition."""
     from jaxpme.batched_tiled import Ewald
 
     calc = Ewald(exponent=exponent)
@@ -96,6 +105,9 @@ def test_matches_unsorted(exponent):
 
 
 def test_higher_order_matches_unsorted():
+    """Force training (reverse over reverse) and Born charges (forward over
+    reverse) differentiate through the primitives' transpose, jvp and batching
+    rules; they must agree with plain indexing."""
     from jaxpme.batched_tiled import Ewald
 
     calc = Ewald()
@@ -129,6 +141,8 @@ def test_higher_order_matches_unsorted():
 @pytest.mark.parametrize("full_neighbor_list", [True, False])
 @pytest.mark.parametrize("exclusion_radius", [None, 3.0])
 def test_rspace_matches_full_unsorted(full_neighbor_list, exclusion_radius):
+    """`_rspace` on half or full lists, sorted or plain, matches the full list
+    with plain indexing in value and gradients."""
     import vesin
 
     from jaxpme.potentials import potential
@@ -161,9 +175,9 @@ def test_rspace_matches_full_unsorted(full_neighbor_list, exclusion_radius):
 
 
 def test_pair_scatters_are_sorted_or_unique():
-    # pins the mechanism on what XLA sees: in force training (reverse over
-    # reverse) and Born-charge training (reverse over forward over reverse), no
-    # scatter over a pair axis may be a plain (contended) scatter-add
+    """Every scatter over a pair axis in the lowered force-training and
+    Born-charge-training graphs is flagged sorted or unique: unflagged ones run
+    with contended atomics on GPU, and this is where a regression would show."""
     from jaxpme.batched_tiled import Ewald
     from jaxpme.batched_tiled.batching import get_batch, prepare, sample_shapes
 

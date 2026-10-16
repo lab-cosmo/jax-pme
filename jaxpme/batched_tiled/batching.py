@@ -17,17 +17,16 @@ lets pass 2 collapse to `reshape + sum(axis=1)` instead of `segment_sum`; pass
 `Batch` and `NonPeriodic` are re-imported from `batched_mixed.batching`; only
 the `Periodic` layout differs.
 
-Periodic pairs are a half neighbour list (each pair once, from
-`to_structure(..., full_list=False)`); the calculator sums both directions.
-
-Pair layout contract (both `Batch` and `NonPeriodic`): `centers` is sorted and
-`others[others_perm]` is sorted, padding pairs included (they sit at the end
-and point at the padding atom, the largest index). The calculator relies on it
-to keep every pair gather/reduction a sorted or permutation op under AD (see
-`jaxpme.utils.take_sorted`). Samples must therefore come with centre-sorted
-pairs, as vesin's `ase_neighbor_list` returns them (`get_batch` checks);
-`prepare` caches `others_perm` per sample, otherwise `get_batch` computes it.
-A `Batch` with `others_perm=None` takes the unsorted fallback.
+Pair layout (`Batch` and `NonPeriodic`):
+- Periodic pairs form a half neighbour list, each pair once; the calculator
+  sums both directions. Non-periodic pairs list every atom pair once.
+- `centers` is sorted; `others[others_perm]` is sorted. Padding pairs come last
+  and point at the padding atom, the largest atom index.
+The calculator relies on this to express every pair gather and reduction as a
+sorted or permutation op (see `jaxpme.utils.take_sorted`). `get_batch` raises
+on samples whose pairs are not sorted by centre; vesin's sorted lists (used by
+`prepare`) are. `prepare` stores `others_perm` per sample, otherwise
+`get_batch` computes it. A `Batch` with `others_perm=None` uses plain gathers.
 """
 
 import numpy as np
@@ -305,8 +304,8 @@ def get_batch(
             num_nonpbc = len(lr.centers)
             nonpbc_slice = slice(nonpbc_offset, nonpbc_offset + num_nonpbc)
             smearing[idx] = 1.0
-            # the bare sum runs over both directions, so the roles can swap:
-            # `to_lr` sorts `others`, the layout wants sorted centers
+            # `to_lr` sorts `others`; the bare sum runs over both directions,
+            # so swapping the roles gives sorted centers
             nonpbc_centers[nonpbc_slice] = lr.others + atom_offset
             nonpbc_others[nonpbc_slice] = lr.centers + atom_offset
             nonpbc_others_perm[nonpbc_slice] = (

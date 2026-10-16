@@ -54,20 +54,18 @@ def get_distances(cell, Ra, Rb, cell_shifts):
     return safe_norm(R, axis=-1)
 
 
-# Pair gathers and reductions for a sorted pair layout (issue #37).
+# Pair gathers and reductions for a sorted pair layout: `centers` sorted,
+# `others[others_perm]` sorted, padding pairs last on the padding atom.
 #
-# Under reverse-mode AD a gather `x[idx]` transposes to a scatter-add, which on
-# GPU serialises on colliding addresses (every atom appears in ~neighbours
-# pairs). Two cases stay cheap: sorted indices (XLA reduces each run of equal
-# indices before writing) and permutations (no collisions). With `centers`
-# sorted and `others[others_perm]` sorted, every pair gather and reduction can
-# be one of those. JAX keeps the flags when it transposes a gather, but drops
-# them when it transposes a scatter-add back into a gather, so the forward
-# `segment_sum` would be a plain scatter again under second-order AD (force
-# training). Hence three linear primitives that transpose into each other:
-#   gather_sorted <-> segment_sum_sorted,   permute(perm, inv) <-> permute(inv, perm)
-# They are closed under jvp/transpose/vmap at any order; no custom_vjp, so
-# forward-over-reverse (jacfwd of forces) works.
+# Under reverse-mode AD a gather transposes to a scatter-add, which XLA executes
+# with atomic adds that serialise on repeated indices, unless the indices are
+# flagged sorted or unique.
+# The flags alone do not survive: JAX transposes a scatter-add into a gather
+# without `indices_are_sorted`, so a second transpose yields an unflagged
+# scatter-add. The three linear primitives below transpose into each other with
+# the flags kept -- sorted gather <-> sorted segment sum, permutation <->
+# inverse permutation -- and are closed under jvp, transpose and vmap. There is
+# no custom_vjp, so forward-over-reverse differentiation works.
 
 
 def _linear_primitive(name, impl, shape, transpose, n_idx):

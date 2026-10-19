@@ -541,3 +541,36 @@ def test_nonneutral_exponents_vs_serial(exponent, halfspace):
     )
 
     np.testing.assert_allclose(energy, energy_ref, rtol=1e-8)
+
+
+@pytest.mark.parametrize("exponent", [1, 3])
+def test_half_list_matches_full_list(exponent):
+    """The default half neighbour list holds half the pairs and gives the same
+    potentials, energies, forces and stress as the full list, on a batch mixing
+    3D, 2D-slab (Coulomb only) and non-periodic structures."""
+    from ase.build import bulk
+
+    from jaxpme.batched_tiled.calculators import Ewald
+
+    frames = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index=":")
+    cluster = frames[1].copy()
+    cluster.set_pbc(False)
+    big = bulk("NaCl", "rocksalt", a=5.64, cubic=True).repeat(2)
+    big.rattle(0.1, seed=0)
+    big.set_initial_charges(np.where(big.numbers == 11, 1.0, -1.0))
+    structures = [frames[0], big, cluster, frames[2]]
+    if exponent == 1:
+        structures.append(frames[3])
+
+    def run(full_neighbor_list):
+        calc = Ewald(exponent=exponent, full_neighbor_list=full_neighbor_list)
+        q, sr, nopbc, pbc = calc.prepare(structures, num_k=400, cutoff=5.0)
+        e, f, s = calc.energy_forces_stress(q, sr, nopbc, pbc)
+        return int(sr.pair_mask.sum()), calc.potentials(q, sr, nopbc, pbc), e, f, s
+
+    n_half, *half = run(False)
+    n_full, *full = run(True)
+    assert 2 * n_half == n_full
+    for a, b in zip(half, full):
+        assert np.all(np.isfinite(a))
+        np.testing.assert_allclose(a, b, atol=1e-12, rtol=1e-12)

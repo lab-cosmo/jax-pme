@@ -341,8 +341,12 @@ def to_lr(structure, lr_wavelength, smearing, halfspace=True):
         raise ValueError(f"we support 3D, 2D, or no pbc. got {pbc}")
 
 
-def to_structure(atoms, cutoff, dtype=np.float64):
-    from vesin import ase_neighbor_list as neighbor_list
+def to_structure(atoms, cutoff, dtype=np.float64, full_list=True):
+    from vesin import NeighborList
+
+    def neighbor_list(quantities, atoms, cutoff):
+        nl = NeighborList(cutoff=cutoff, full_list=full_list, sorted=True)
+        return nl.compute(atoms.positions, atoms.cell[:], atoms.pbc, quantities)
 
     structure = {}
     structure["cell"] = atoms.get_cell().array.astype(dtype)

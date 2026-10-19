@@ -12,6 +12,7 @@ jaxpme/
 ├── kspace.py           # K-space: numpy preprocessing (grids) + jax.numpy JIT ops (p3m_influence, kvectors)
 ├── mesh.py             # Mesh interpolation: lagrange() and bspline() (n=1-5)
 ├── utils.py            # Neighbor lists, cell handling
+├── pairs.py            # Sorted pair gathers/segment sums (primitives with AD rules)
 ├── prefactors.py       # Unit conversion constants (eV_A, etc.)
 ├── batched_flat/       # Batched Ewald (flat padding strategy)
 ├── batched_mixed/      # Batched Ewald (mixed real/reciprocal batching)
@@ -46,6 +47,9 @@ gather materialising the full trailing axis *per work tile* (`[T, K_pad, 3]`),
 which is exactly the matrix the tiling exists to avoid. XLA fuses it away at
 small sizes and gives up as `T · K_pad` grows, so the cost appears suddenly.
 Pinned by `tests/test_batched_tiled_kernel_memory.py` via `memory_analysis()`.
+
+### batched_tiled pair layout
+`batched_tiled` batches store `centers` and `pair_to_structure` sorted and `others[others_perm]` sorted (`Batch.others_perm`, `NonPeriodic.others_perm`), padding pairs last on the padding atom. `prepare` produces centre-sorted lists (vesin sorted; non-PBC pairs swap `to_lr`'s roles) and computes each `others_perm` once; `get_batch` offsets it and sorts foreign samples. `potentials_fn` builds `pairs.permutation` (sorted others and inverse) once per list per call and uses `pairs.take` / `pairs.segment_sum`; `_rspace(j_perm=None)` keeps plain indexing for serial calculators and `batched_mixed`. Why: a gather transposes to a scatter-add, XLA serialises scatter-adds on repeated indices unless they are flagged sorted or unique, and JAX's scatter-add transpose drops `indices_are_sorted`, so `pairs.py` defines the sorted gather and sorted segment sum as primitives that transpose into each other; permutations use plain gathers with `unique_indices`. No `custom_vjp`, so forward-over-reverse works. `tests/test_pair_layout.py::test_pair_scatters_are_sorted_or_unique` checks the lowered StableHLO.
 
 ### Potential convention (matches torch-pme)
 `V_i = (1/2) Σ_{j≠i} q_j v(r_ij)` — the 1/2 is absorbed into the potential so `energy = Σ_i q_i V_i` (no extra 1/2). Both PBC and non-PBC paths (serial and batched) return this halved potential. If comparing against a textbook `V_i = Σ q_j/r_ij` reference, expect a factor of 2.

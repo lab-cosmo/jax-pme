@@ -10,6 +10,7 @@ Same API surface as `jaxpme.batched_mixed.calculators.Ewald`: returns a
 import jax
 import jax.numpy as jnp
 
+from jaxpme import pairs
 from jaxpme.calculators import Calculator
 from jaxpme.kspace import (
     get_reciprocal,
@@ -17,6 +18,7 @@ from jaxpme.kspace import (
     slab_geometry,
 )
 from jaxpme.potentials import potential
+from jaxpme.solvers import _rspace
 from jaxpme.utils import compose_cell, get_distances, get_volume, safe_norm
 
 from .kernel import phi_recip_xla_vmap
@@ -212,50 +214,50 @@ def Ewald(
 
     def potentials_fn(charges, batch, batch_nopbc, batch_pbc):
         batch = batch._replace(cell=compose_cell(batch))
-        N_all = charges.shape[0]
         pbc_mask_atom = batch.pbc_mask[batch.atom_to_structure]
         charges = charges * batch.atom_mask
 
+        def layout(others, others_perm):
+            # sorted pair layout (see batching); others_perm=None: plain indexing
+            if others_perm is None:
+                return (lambda x, i: x[i]), others, None
+            j_perm = pairs.permutation(others, others_perm)
+            return pairs.take, j_perm, j_perm
+
+        take, others, j_perm = layout(batch.others, batch.others_perm)
+
         if batch.distances is None:
             r = get_distances(
-                batch.cell[batch.pair_to_structure],
-                batch.positions[batch.centers],
-                batch.positions[batch.others],
+                take(batch.cell, batch.pair_to_structure),
+                take(batch.positions, batch.centers),
+                take(batch.positions, others),
                 batch.cell_shifts,
             )
             r = r * batch.pair_mask
         else:
             r = batch.distances
 
-        extra_r = (
-            safe_norm(
-                batch.positions[batch_nopbc.others] - batch.positions[batch_nopbc.centers],
-                axis=-1,
-            )
-            * batch_nopbc.pair_mask
+        # real-space, non-PBC: bare 1/r between every pair, both directions
+        c = batch_nopbc.centers
+        take_n, o, nopbc_perm = layout(batch_nopbc.others, batch_nopbc.others_perm)
+        extra_r = safe_norm(
+            take_n(batch.positions, o) - take_n(batch.positions, c), axis=-1
         )
-
-        # real-space, non-PBC: bare 1/r between every pair
-        real_space = jax.ops.segment_sum(
-            charges[batch_nopbc.others] * pot.real(extra_r),
-            batch_nopbc.centers,
-            num_segments=N_all,
+        extra_r = extra_r * batch_nopbc.pair_mask
+        real_space = _rspace(
+            pot, None, charges, extra_r, c, batch_nopbc.others, j_perm=nopbc_perm
         )
-        real_space += jax.ops.segment_sum(
-            charges[batch_nopbc.centers] * pot.real(extra_r),
-            batch_nopbc.others,
-            num_segments=N_all,
-        )
-        real_space = (real_space * batch.atom_mask * ~pbc_mask_atom) / 2
+        real_space = real_space * batch.atom_mask * ~pbc_mask_atom
 
         # real-space, PBC: range-separated short-range from neighbor list
         real_space += (
             solver.rspace(
-                batch.smearing[batch.pair_to_structure],
+                take(batch.smearing, batch.pair_to_structure),
                 charges,
                 r,
                 batch.centers,
                 batch.others,
+                j_perm=j_perm,
             )
             * batch.atom_mask
             * pbc_mask_atom

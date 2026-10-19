@@ -23,6 +23,8 @@ energies, forces, stress = calculator.energy_forces_stress(
 
 `Batch` and `NonPeriodic` are re-imported from `batched_mixed` (same shapes). Only `Periodic` differs.
 
+The periodic neighbour list is a half list (each pair once) and the calculator sums both directions. `Ewald(full_neighbor_list=True)` switches both `prepare` and the calculator to full lists; a batch assembled by hand must use the list type the calculator was built for.
+
 ## How it works
 
 The standard Ewald reciprocal sum is the structure-factor form:

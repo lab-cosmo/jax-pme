@@ -16,6 +16,14 @@ lets pass 2 collapse to `reshape + sum(axis=1)` instead of `segment_sum`; pass
 
 `Batch` and `NonPeriodic` are re-imported from `batched_mixed.batching`; only
 the `Periodic` layout differs.
+
+Pair layout (`Batch` and `NonPeriodic`): `centers` is sorted and
+`others[others_perm]` is sorted; padding pairs come last and point at the
+padding atom, the largest atom index. The calculator relies on it to express
+every pair gather and reduction as a sorted or permutation op (`jaxpme.pairs`).
+`prepare` produces centre-sorted lists and computes `others_perm` once per list;
+`get_batch` only offsets it, and sorts samples assembled elsewhere. A `Batch`
+with `others_perm=None` uses plain indexing.
 """
 
 import numpy as np
@@ -113,6 +121,22 @@ def _build_dispatch_table(pbc_atom_off, n_kvec_tiles, BM):
     kt_col = inner % n_kvec_tiles
 
     return np.stack([b_col, mt_col, kt_col], axis=1)
+
+
+def _sorted_pairs(centers, others, cell_shifts, others_perm):
+    """Pairs sorted by centre, and `others_perm` with `others[others_perm]` sorted.
+
+    `prepare` output is already centre-sorted and carries `others_perm`, so this
+    only sorts (and argsorts) samples assembled elsewhere.
+    """
+    if np.any(centers[1:] < centers[:-1]):
+        order = np.argsort(centers, kind="stable")
+        centers, others = centers[order], others[order]
+        cell_shifts = None if cell_shifts is None else cell_shifts[order]
+        others_perm = None
+    if others_perm is None:
+        others_perm = np.argsort(others, kind="stable")
+    return centers, others, cell_shifts, others_perm
 
 
 def get_batch(
@@ -216,11 +240,13 @@ def get_batch(
     pbc_mask = np.zeros(n_structures, dtype=bool)
     atom_mask = np.zeros(n_atoms, dtype=bool)
     pair_mask = np.zeros(n_pairs, dtype=bool)
+    others_perm = np.arange(n_pairs, dtype=int_dtype)
 
     # nonperiodic
     nonpbc_centers = np.full(n_pairs_nonpbc, padding_atom_idx, dtype=int_dtype)
     nonpbc_others = np.full(n_pairs_nonpbc, padding_atom_idx, dtype=int_dtype)
     nonpbc_pair_mask = np.zeros(n_pairs_nonpbc, dtype=bool)
+    nonpbc_others_perm = np.arange(n_pairs_nonpbc, dtype=int_dtype)
 
     # periodic
     pbc_kgrid = np.zeros((B_pbc_padded, K_pad, 3), dtype=dtype)
@@ -256,9 +282,16 @@ def get_batch(
         cell[idx] = structure["cell"]
         effective_cell[idx] = structure.get("effective_cell", structure["cell"])
         pbc_rows[idx] = structure["pbc"]
-        centers[pair_slice] = structure["centers"] + atom_offset
-        others[pair_slice] = structure["others"] + atom_offset
-        cell_shifts[pair_slice] = structure["cell_shifts"]
+        c, o, S, perm = _sorted_pairs(
+            structure["centers"],
+            structure["others"],
+            structure["cell_shifts"],
+            structure.get("others_perm"),
+        )
+        centers[pair_slice] = c + atom_offset
+        others[pair_slice] = o + atom_offset
+        cell_shifts[pair_slice] = S
+        others_perm[pair_slice] = perm + pair_offset
 
         atom_to_structure[atom_slice] = idx
         pair_to_structure[pair_slice] = idx
@@ -285,8 +318,10 @@ def get_batch(
             num_nonpbc = len(lr.centers)
             nonpbc_slice = slice(nonpbc_offset, nonpbc_offset + num_nonpbc)
             smearing[idx] = 1.0
-            nonpbc_centers[nonpbc_slice] = lr.centers + atom_offset
-            nonpbc_others[nonpbc_slice] = lr.others + atom_offset
+            c, o, _, perm = _sorted_pairs(lr.centers, lr.others, None, lr.others_perm)
+            nonpbc_centers[nonpbc_slice] = c + atom_offset
+            nonpbc_others[nonpbc_slice] = o + atom_offset
+            nonpbc_others_perm[nonpbc_slice] = perm + nonpbc_offset
             nonpbc_pair_mask[nonpbc_slice] = True
             nonpbc_offset += num_nonpbc
 
@@ -312,6 +347,7 @@ def get_batch(
         atom_to_structure=atom_to_structure,
         pair_to_structure=pair_to_structure,
         distances=None,
+        others_perm=others_perm,
     )
     periodic_batch = Periodic(
         k_grid=pbc_kgrid,
@@ -337,6 +373,7 @@ def get_batch(
         centers=nonpbc_centers,
         others=nonpbc_others,
         pair_mask=nonpbc_pair_mask,
+        others_perm=nonpbc_others_perm,
     )
 
     return charges, sr_batch, nonperiodic_batch, periodic_batch
@@ -394,7 +431,13 @@ def prepare(
 
     smearing_out, lr = to_lr(structure, lr_wavelength, smearing, halfspace=halfspace)
 
+    if not pbc.any():
+        # the bare sum runs over both directions; `to_lr` sorts `others`, so
+        # swapping the roles gives sorted centers
+        lr = lr._replace(centers=lr.others, others=lr.centers)
+        lr = lr._replace(others_perm=np.argsort(lr.others, kind="stable"))
     structure["lr"] = lr
+    structure["others_perm"] = np.argsort(structure["others"], kind="stable")
     if smearing_out is not None:
         structure["smearing"] = smearing_out
 

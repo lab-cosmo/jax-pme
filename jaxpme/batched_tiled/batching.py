@@ -123,6 +123,16 @@ def _build_dispatch_table(pbc_atom_off, n_kvec_tiles, BM):
     return np.stack([b_col, mt_col, kt_col], axis=1)
 
 
+def _argsort_stable(idx):
+    # NumPy's stable sort is a radix sort for integer dtypes of 16 bits or less
+    # and timsort for wider ones: the cast changes the algorithm, not the
+    # permutation, and the guard on the actual maximum keeps indices from wrapping
+    idx = np.asarray(idx)
+    if idx.size and idx.max() < 2**16:
+        idx = idx.astype(np.uint16)
+    return np.argsort(idx, kind="stable")
+
+
 def _sorted_pairs(centers, others, cell_shifts, others_perm):
     """Pairs sorted by centre, and `others_perm` with `others[others_perm]` sorted.
 
@@ -130,12 +140,12 @@ def _sorted_pairs(centers, others, cell_shifts, others_perm):
     only sorts (and argsorts) samples assembled elsewhere.
     """
     if np.any(centers[1:] < centers[:-1]):
-        order = np.argsort(centers, kind="stable")
+        order = _argsort_stable(centers)
         centers, others = centers[order], others[order]
         cell_shifts = None if cell_shifts is None else cell_shifts[order]
         others_perm = None
     if others_perm is None:
-        others_perm = np.argsort(others, kind="stable")
+        others_perm = _argsort_stable(others)
     return centers, others, cell_shifts, others_perm
 
 
@@ -435,9 +445,9 @@ def prepare(
         # the bare sum runs over both directions; `to_lr` sorts `others`, so
         # swapping the roles gives sorted centers
         lr = lr._replace(centers=lr.others, others=lr.centers)
-        lr = lr._replace(others_perm=np.argsort(lr.others, kind="stable"))
+        lr = lr._replace(others_perm=_argsort_stable(lr.others))
     structure["lr"] = lr
-    structure["others_perm"] = np.argsort(structure["others"], kind="stable")
+    structure["others_perm"] = _argsort_stable(structure["others"])
     if smearing_out is not None:
         structure["smearing"] = smearing_out
 

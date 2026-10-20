@@ -22,8 +22,9 @@ Batch = namedtuple(
         "pair_to_structure",
         "effective_cell",  # see jaxpme.utils.compose_cell
         "pbc",
+        "others_perm",  # others[others_perm] sorted, see jaxpme.batched_tiled.batching
     ),
-    defaults=(None, None),
+    defaults=(None, None, None),
 )
 Periodic = namedtuple(
     "Periodic",
@@ -42,7 +43,9 @@ Periodic = namedtuple(
     # structure_mask: mask for valid periodic structures [num_pbc]
     #              -> True for real structures, False for padding
 )
-NonPeriodic = namedtuple("NonPeriodic", ("centers", "others", "pair_mask"))
+NonPeriodic = namedtuple(
+    "NonPeriodic", ("centers", "others", "pair_mask", "others_perm"), defaults=(None,)
+)
 
 
 def get_batch(

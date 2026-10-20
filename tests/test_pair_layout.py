@@ -231,3 +231,16 @@ def test_pair_scatters_are_sorted_or_unique():
         for o in pair_scatters:
             flags = [str(o.attributes[k]) for k in ("indices_are_sorted", "unique_indices")]
             assert "true" in flags, o
+
+
+@pytest.mark.parametrize("n_max", [1, 1000, 2**16 - 1, 2**16, 2**16 + 1, 2**20])
+def test_argsort_stable_matches_numpy(n_max):
+    """The narrow-dtype argsort gives exactly NumPy's stable permutation, also
+    for maximum indices on either side of the 16-bit limit."""
+    from jaxpme.batched_tiled.batching import _argsort_stable
+
+    rng = np.random.default_rng(n_max)
+    idx = rng.integers(0, n_max, 20000)
+    idx[0] = n_max - 1
+    for i in (idx, idx.astype(np.uint64), idx[:0]):
+        np.testing.assert_array_equal(_argsort_stable(i), np.argsort(i, kind="stable"))

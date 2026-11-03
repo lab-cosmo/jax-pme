@@ -2,9 +2,10 @@ import jax
 import jax.numpy as jnp
 
 from collections import namedtuple
+from functools import partial
 
 # -- high-level interface --
-Potential = namedtuple("Potential", ("sr", "lr", "real", "correction"))
+Potential = namedtuple("Potential", ("sr", "lr", "real", "correction", "sr_derivatives"))
 
 
 def potential(exponent=1, exclusion_radius=None, custom_potential=None):
@@ -67,6 +68,26 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
         masked = jnp.where(mask, 1e-6, r)
         return jnp.where(mask, 0.0, pot.real(masked))
 
+    def sr_derivatives(smearing, r):
+        # (ψ, ψ', ψ'') of the real-space kernel, for multipoles. The exclusion
+        # cutoff multiplies each derivative *after* differentiation (as in
+        # torch-pme): differentiating f_c itself would leak f_c'' ≠ 0 at the
+        # exclusion radius into the dipole terms and make them discontinuous
+        # there. smearing=None: the bare potential (non-periodic).
+        mask = r == 0.0
+        masked = jnp.where(mask, 1e-6, r)
+        if smearing is None:
+            f = pot.real
+        elif exclusion_radius is not None:
+            f = lambda r: -pot.lr_r(smearing, r)  # noqa: E731
+        else:
+            f = partial(pot.sr_r, smearing)
+        derivatives = radial_derivatives(f)(masked)
+        if smearing is not None and exclusion_radius is not None:
+            fc = cutoff_function(masked)
+            derivatives = tuple(fc * d for d in derivatives)
+        return tuple(jnp.where(mask, 0.0, d) for d in derivatives)
+
     def correction(
         smearing,
         charges,
@@ -86,7 +107,28 @@ def potential(exponent=1, exclusion_radius=None, custom_potential=None):
 
         return c
 
-    return Potential(sr, lr, real, correction)
+    return Potential(sr, lr, real, correction, sr_derivatives)
+
+
+def radial_derivatives(f):
+    # (f, f', f'') of an elementwise radial function, via nested jvp
+    def derivatives(r):
+        ones = jnp.ones_like(r)
+
+        def f_and_df(r):
+            return jax.jvp(f, (r,), (ones,))
+
+        (f0, f1), (_, f2) = jax.jvp(f_and_df, (r,), (ones,))
+        return f0, f1, f2
+
+    return derivatives
+
+
+def dipole_self_field(smearing):
+    # Gaussian dipole's own field at its centre is -4β³/(3√π) μ, β = 1/(√2σ);
+    # the k-space sum contains it, so this is added back
+    beta = 1 / (jnp.sqrt(2.0) * smearing)
+    return 4 * beta**3 / (3 * jnp.sqrt(jnp.pi))
 
 
 # -- low-level implementation of potentials --

@@ -2,13 +2,12 @@ import jax
 
 from collections import namedtuple
 
+from jaxpme.potentials import Potential as _Potential
 from jaxpme.potentials import coulomb, inverse_power_law
 from jaxpme.potentials import potential as _potential
 
 # -- high-level interface --
-Potential = namedtuple(
-    "Potential", ("sr", "lr", "real", "correction", "batched_correction")
-)
+Potential = namedtuple("Potential", (*_Potential._fields, "batched_correction"))
 
 
 def potential(exponent=1, exclusion_radius=None, custom_potential=None):

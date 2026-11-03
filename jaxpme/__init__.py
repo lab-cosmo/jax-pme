@@ -1,4 +1,4 @@
-from .calculators import P3M, PME, Ewald
+from .calculators import P3M, PME, Ewald, EwaldDipole
 from .prefactors import prefactors
 
 try:
@@ -6,4 +6,4 @@ try:
 except ImportError:  # running from a source tree without an install
     __version__ = "unknown"
 
-__all__ = ["P3M", "PME", "Ewald", "__version__", "prefactors"]
+__all__ = ["P3M", "PME", "Ewald", "EwaldDipole", "__version__", "prefactors"]

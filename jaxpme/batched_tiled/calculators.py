@@ -15,14 +15,101 @@ from jaxpme.calculators import Calculator
 from jaxpme.kspace import (
     get_reciprocal,
     slab_energy_per_atom,
+    slab_field_per_atom,
     slab_geometry,
 )
 from jaxpme.potentials import potential
-from jaxpme.solvers import _rspace
-from jaxpme.utils import compose_cell, get_distances, get_volume, safe_norm
+from jaxpme.solvers import _rspace, _rspace_dipole
+from jaxpme.utils import (
+    compose_cell,
+    get_displacements,
+    get_distances,
+    get_volume,
+    safe_norm,
+)
 
 from .kernel import phi_recip_xla_vmap
 from .kspace import generate_ewald_kvectors
+
+
+def _kspace_setup(pot, g_factor, sr_batch, batch_pbc):
+    """Materialise per-system (kvec [B, K_pad, 3], W [B, K_pad]) plus the
+    per-system metadata used by the kernel and corrections. No
+    `stop_gradient` — `kvec`/`W` depend on `cell` via `reciprocal_cell`,
+    and we want stress to flow through.
+    """
+    cell_pbc = sr_batch.cell[batch_pbc.structure_to_structure]
+    reciprocal_cell = jax.vmap(get_reciprocal)(cell_pbc)
+    volume_pbc = jax.vmap(get_volume)(cell_pbc)
+    smearing_pbc = sr_batch.smearing[batch_pbc.structure_to_structure]
+    pbc_pbc = batch_pbc.pbc
+
+    kvec = jax.vmap(generate_ewald_kvectors)(reciprocal_cell, batch_pbc.k_grid)
+    k2 = (kvec**2).sum(axis=-1)
+    G = jax.vmap(pot.lr)(smearing_pbc, k2)
+    # Every k=0 row is masked out here and the k=0 term is added back once
+    # per system in `kspace_fn` -- mirrors `solvers.ewald.kspace`. Three
+    # kinds of row land on k2 == 0: the real k=0 vector (full-space grids
+    # only), the padding rows of a real system's k-axis, and whole padding
+    # systems. For p <= 3 `pot.lr(s, 0)` is 0 and this is a no-op; for
+    # p > 3 it is finite, so without the mask every padding row would
+    # inject a spurious `lr_k0 · Σq`.
+    W = jnp.where(k2 == 0.0, 0.0, G * g_factor) / volume_pbc[:, None]
+    # per-system k->0 limit, applied once (no g_factor: k=0 has no -k partner)
+    k0_pbc = jax.vmap(pot.lr)(smearing_pbc, jnp.zeros_like(smearing_pbc))
+
+    # BM/BK travel as dummy-array shapes; `.shape[0]` recovers the static
+    # int the kernel needs (see `batching.get_batch`)
+    n_kvec_tiles = batch_pbc.k_grid.shape[1] // batch_pbc.BK.shape[0]
+    atom_off = jnp.asarray(batch_pbc.pbc_atom_off)
+    dispatch_table = jnp.asarray(batch_pbc.dispatch_table)
+
+    return (
+        kvec,
+        W,
+        k0_pbc,
+        cell_pbc,
+        volume_pbc,
+        smearing_pbc,
+        pbc_pbc,
+        atom_off,
+        dispatch_table,
+        batch_pbc.BM.shape[0],
+        batch_pbc.BK.shape[0],
+        n_kvec_tiles,
+    )
+
+
+def _pair_layout(others, others_perm):
+    """(take, others, j_perm) for the sorted pair layout, see `batching`.
+
+    `others_perm=None` (hand-built batch) falls back to plain indexing."""
+    if others_perm is None:
+        return (lambda x, i: x[i]), others, None
+    j_perm = pairs.permutation(others, others_perm)
+    return pairs.take, j_perm, j_perm
+
+
+def _slab(q, r, seg, B, cell, volume, pbc, mu=None):
+    """2D slab correction (Coulomb) per atom on the flat layout, `/ volume`, zero
+    outside 2D systems. With dipoles `mu`, also returns the field."""
+    n_hat, basis_len = jax.vmap(slab_geometry)(cell, pbc)  # [B, 3], [B]
+    z = jnp.sum(r * n_hat[seg], axis=-1)
+    mu_z = 0.0 if mu is None else jnp.sum(mu * n_hat[seg], axis=-1)
+    M_axis = jax.ops.segment_sum(q * z + mu_z, seg, num_segments=B)
+    M_axis_sq = jax.ops.segment_sum(q * z**2 + 2 * mu_z * z, seg, num_segments=B)
+    charge_tot = jax.ops.segment_sum(q, seg, num_segments=B)
+    is_2d = (jnp.sum(pbc, axis=-1) == 2)[seg]
+
+    phi = slab_energy_per_atom(
+        z, M_axis[seg], M_axis_sq[seg], charge_tot[seg], basis_len[seg]
+    )
+    phi = jnp.where(is_2d, phi / volume[seg], 0.0)
+    if mu is None:
+        return phi
+    field = slab_field_per_atom(z, M_axis[seg], charge_tot[seg])
+    field = jnp.where(is_2d, field / volume[seg], 0.0)
+    return phi, field[:, None] * n_hat[seg]
 
 
 def Ewald(
@@ -68,53 +155,6 @@ def Ewald(
         _raw = inverse_power_law(exponent)
         _is_coulomb = False
 
-    def _kspace_setup(sr_batch, batch_pbc):
-        """Materialise per-system (kvec [B, K_pad, 3], W [B, K_pad]) plus the
-        per-system metadata used by the kernel and corrections. No
-        `stop_gradient` — `kvec`/`W` depend on `cell` via `reciprocal_cell`,
-        and we want stress to flow through.
-        """
-        cell_pbc = sr_batch.cell[batch_pbc.structure_to_structure]
-        reciprocal_cell = jax.vmap(get_reciprocal)(cell_pbc)
-        volume_pbc = jax.vmap(get_volume)(cell_pbc)
-        smearing_pbc = sr_batch.smearing[batch_pbc.structure_to_structure]
-        pbc_pbc = batch_pbc.pbc
-
-        kvec = jax.vmap(generate_ewald_kvectors)(reciprocal_cell, batch_pbc.k_grid)
-        k2 = (kvec**2).sum(axis=-1)
-        G = jax.vmap(pot.lr)(smearing_pbc, k2)
-        # Every k=0 row is masked out here and the k=0 term is added back once
-        # per system in `kspace_fn` -- mirrors `solvers.ewald.kspace`. Three
-        # kinds of row land on k2 == 0: the real k=0 vector (full-space grids
-        # only), the padding rows of a real system's k-axis, and whole padding
-        # systems. For p <= 3 `pot.lr(s, 0)` is 0 and this is a no-op; for
-        # p > 3 it is finite, so without the mask every padding row would
-        # inject a spurious `lr_k0 · Σq`.
-        W = jnp.where(k2 == 0.0, 0.0, G * g_factor) / volume_pbc[:, None]
-        # per-system k->0 limit, applied once (no g_factor: k=0 has no -k partner)
-        k0_pbc = jax.vmap(pot.lr)(smearing_pbc, jnp.zeros_like(smearing_pbc))
-
-        # BM/BK travel as dummy-array shapes; `.shape[0]` recovers the static
-        # int the kernel needs (see `batching.get_batch`)
-        n_kvec_tiles = batch_pbc.k_grid.shape[1] // batch_pbc.BK.shape[0]
-        atom_off = jnp.asarray(batch_pbc.pbc_atom_off)
-        dispatch_table = jnp.asarray(batch_pbc.dispatch_table)
-
-        return (
-            kvec,
-            W,
-            k0_pbc,
-            cell_pbc,
-            volume_pbc,
-            smearing_pbc,
-            pbc_pbc,
-            atom_off,
-            dispatch_table,
-            batch_pbc.BM.shape[0],
-            batch_pbc.BK.shape[0],
-            n_kvec_tiles,
-        )
-
     def _kspace_corrections(
         charges,
         sr_batch,
@@ -141,14 +181,7 @@ def Ewald(
 
         is_2d = jnp.sum(pbc_pbc, axis=-1) == 2
         if _is_coulomb:
-            n_hat, basis_len = jax.vmap(slab_geometry)(cell_pbc, pbc_pbc)  # [B, 3], [B]
-            z_atom = jnp.sum(r_pbc * n_hat[seg], axis=-1)
-            M_axis = jax.ops.segment_sum(q_pbc * z_atom, seg, num_segments=B_pbc)
-            M_axis_sq = jax.ops.segment_sum(q_pbc * z_atom**2, seg, num_segments=B_pbc)
-            E_slab = slab_energy_per_atom(
-                z_atom, M_axis[seg], M_axis_sq[seg], charge_tot[seg], basis_len[seg]
-            )
-            slab_term = jnp.where(is_2d[seg], E_slab / volume_pbc[seg], 0.0)
+            slab_term = _slab(q_pbc, r_pbc, seg, B_pbc, cell_pbc, volume_pbc, pbc_pbc)
         else:
             # IPLP / custom: 2D-PBC correction is not implemented -> NaN
             slab_term = jnp.where(is_2d[seg], jnp.full_like(c_self, jnp.nan), 0.0)
@@ -172,7 +205,7 @@ def Ewald(
             BM_use,
             BK_use,
             n_kvec_tiles,
-        ) = _kspace_setup(sr_batch, batch_pbc)
+        ) = _kspace_setup(pot, g_factor, sr_batch, batch_pbc)
 
         r_pbc = sr_batch.positions[batch_pbc.pbc_to_flat]
         q_pbc = charges[batch_pbc.pbc_to_flat] * batch_pbc.pbc_atom_mask
@@ -217,14 +250,7 @@ def Ewald(
         pbc_mask_atom = batch.pbc_mask[batch.atom_to_structure]
         charges = charges * batch.atom_mask
 
-        def layout(others, others_perm):
-            # sorted pair layout (see batching); others_perm=None: plain indexing
-            if others_perm is None:
-                return (lambda x, i: x[i]), others, None
-            j_perm = pairs.permutation(others, others_perm)
-            return pairs.take, j_perm, j_perm
-
-        take, others, j_perm = layout(batch.others, batch.others_perm)
+        take, others, j_perm = _pair_layout(batch.others, batch.others_perm)
 
         if batch.distances is None:
             r = get_distances(
@@ -239,7 +265,7 @@ def Ewald(
 
         # real-space, non-PBC: bare 1/r between every pair, both directions
         c = batch_nopbc.centers
-        take_n, o, nopbc_perm = layout(batch_nopbc.others, batch_nopbc.others_perm)
+        take_n, o, nopbc_perm = _pair_layout(batch_nopbc.others, batch_nopbc.others_perm)
         extra_r = safe_norm(
             take_n(batch.positions, o) - take_n(batch.positions, c), axis=-1
         )
@@ -324,6 +350,191 @@ def Ewald(
     ):
         # `cutoff`/`smearing` default to balanced values from `num_k`; see
         # `batching.prepare`
+        from .batching import get_batch, prepare
+
+        charges, _, *batch = get_batch(
+            [
+                prepare(
+                    atoms,
+                    num_k=num_k,
+                    cutoff=cutoff,
+                    smearing=smearing,
+                    halfspace=halfspace,
+                    full_list=full_neighbor_list,
+                )
+                for atoms in atomss
+            ],
+            BM=BM,
+            BK=BK,
+        )
+        return charges, *batch
+
+    return Calculator(
+        prepare_fn,
+        potentials_fn,
+        energy_fn,
+        energy_and_forces_fn,
+        energy_and_forces_and_stress_fn,
+    )
+
+
+def EwaldDipole(prefactor=1.0, halfspace=True, full_neighbor_list=False):
+    """Tile-dispatched batched Ewald for point charges and point dipoles.
+
+    Coulomb only, tin-foil boundary. `potentials` returns (φ, F) with the halved
+    convention of `jaxpme.EwaldDipole`: energy = Σ q φ - Σ μ·F, physical field 2F.
+    `full_neighbor_list` as in `Ewald`.
+    """
+    from jaxpme.potentials import coulomb, dipole_self_field
+    from jaxpme.solvers import ewald_dipole
+
+    pot = potential(exponent=1)
+    solver = ewald_dipole(pot, full_neighbor_list=full_neighbor_list)
+    raw = coulomb()
+    g_factor = 2 if halfspace else 1
+
+    def kspace_fn(charges, dipoles, sr_batch, batch_pbc):
+        N_all = charges.shape[0]
+        (
+            kvec,
+            W,
+            _,
+            cell_pbc,
+            volume_pbc,
+            smearing_pbc,
+            pbc_pbc,
+            atom_off,
+            dispatch_table,
+            BM_use,
+            BK_use,
+            n_kvec_tiles,
+        ) = _kspace_setup(pot, g_factor, sr_batch, batch_pbc)
+
+        B_pbc = batch_pbc.structure_mask.shape[0]
+        seg = batch_pbc.pbc_segment_atom
+        mask = batch_pbc.pbc_atom_mask
+        r_pbc = sr_batch.positions[batch_pbc.pbc_to_flat] * mask[:, None]
+        q_pbc = charges[batch_pbc.pbc_to_flat] * mask
+        mu_pbc = dipoles[batch_pbc.pbc_to_flat] * mask[:, None]
+
+        phi, field = phi_recip_xla_vmap(
+            r_pbc,
+            q_pbc,
+            kvec,
+            W,
+            atom_off,
+            dispatch_table,
+            BM=BM_use,
+            BK=BK_use,
+            n_kvec_tiles=n_kvec_tiles,
+            mu=mu_pbc,
+        )
+
+        # self + background (charges), self field (dipoles)
+        charge_tot = jax.ops.segment_sum(q_pbc, seg, num_segments=B_pbc)
+        phi -= q_pbc * raw.correction_self(smearing_pbc)[seg]
+        phi -= (
+            2.0 * (raw.correction_background(smearing_pbc) * charge_tot / volume_pbc)[seg]
+        )
+        field += dipole_self_field(smearing_pbc)[seg][:, None] * mu_pbc
+
+        slab_phi, slab_field = _slab(
+            q_pbc, r_pbc, seg, B_pbc, cell_pbc, volume_pbc, pbc_pbc, mu=mu_pbc
+        )
+        phi += slab_phi
+        field += slab_field
+
+        phi = jax.ops.segment_sum(phi * mask, batch_pbc.pbc_to_flat, num_segments=N_all)
+        field = jax.ops.segment_sum(
+            field * mask[:, None], batch_pbc.pbc_to_flat, num_segments=N_all
+        )
+        return phi / 2, field / 2
+
+    def potentials_fn(charges, dipoles, batch, batch_nopbc, batch_pbc):
+        assert batch.distances is None, "dipoles need pair vectors, not distances"
+        batch = batch._replace(cell=compose_cell(batch))
+        pbc_mask_atom = (batch.pbc_mask[batch.atom_to_structure] * batch.atom_mask)[:, None]
+        nopbc_mask_atom = (~batch.pbc_mask[batch.atom_to_structure] * batch.atom_mask)[
+            :, None
+        ]
+        charges = charges * batch.atom_mask
+        dipoles = dipoles * batch.atom_mask[:, None]
+
+        # real-space, non-PBC: bare interactions between every pair, both directions
+        c = batch_nopbc.centers
+        take, o, j_perm = _pair_layout(batch_nopbc.others, batch_nopbc.others_perm)
+        R = take(batch.positions, o) - take(batch.positions, c)
+        R = R * batch_nopbc.pair_mask[:, None]
+        phi_np, field_np = _rspace_dipole(
+            pot, None, charges, dipoles, R, c, batch_nopbc.others, j_perm=j_perm
+        )
+
+        # real-space, PBC: range-separated short-range from the neighbor list
+        take, o, j_perm = _pair_layout(batch.others, batch.others_perm)
+        R = get_displacements(
+            take(batch.cell, batch.pair_to_structure),
+            take(batch.positions, batch.centers),
+            take(batch.positions, o),
+            batch.cell_shifts,
+        )
+        R = R * batch.pair_mask[:, None]
+        phi_sr, field_sr = solver.rspace(
+            take(batch.smearing, batch.pair_to_structure),
+            charges,
+            dipoles,
+            R,
+            batch.centers,
+            batch.others,
+            j_perm=j_perm,
+        )
+
+        phi_k, field_k = kspace_fn(charges, dipoles, batch, batch_pbc)
+
+        phi = phi_np * nopbc_mask_atom[:, 0] + (phi_sr + phi_k) * pbc_mask_atom[:, 0]
+        field = field_np * nopbc_mask_atom + (field_sr + field_k) * pbc_mask_atom
+        return prefactor * phi, prefactor * field
+
+    def energy_fn(charges, dipoles, batch, batch_nopbc, batch_pbc):
+        phi, field = potentials_fn(charges, dipoles, batch, batch_nopbc, batch_pbc)
+        energies = charges * phi - jnp.sum(dipoles * field, axis=-1)
+        return (
+            jax.ops.segment_sum(
+                energies, batch.atom_to_structure, num_segments=batch.cell.shape[0]
+            )
+            * batch.structure_mask
+        )
+
+    def _grads(charges, dipoles, batch, batch_nopbc, batch_pbc):
+        def total_energy_fn(batch):
+            energies = energy_fn(charges, dipoles, batch, batch_nopbc, batch_pbc)
+            return energies.sum(), energies
+
+        (_, energy), grads = jax.value_and_grad(
+            total_energy_fn, has_aux=True, allow_int=True
+        )(batch)
+        return energy, grads
+
+    def energy_and_forces_fn(charges, dipoles, batch, batch_nopbc, batch_pbc):
+        energy, grads = _grads(charges, dipoles, batch, batch_nopbc, batch_pbc)
+        return energy, -grads.positions * batch.atom_mask[:, None]
+
+    def energy_and_forces_and_stress_fn(charges, dipoles, batch, batch_nopbc, batch_pbc):
+        # dipoles are held fixed under strain, so the stress is not symmetric
+        energy, grads = _grads(charges, dipoles, batch, batch_nopbc, batch_pbc)
+        forces = -grads.positions * batch.atom_mask[:, None]
+        stress = (
+            jax.ops.segment_sum(
+                jnp.einsum("ia,ib->iab", batch.positions, grads.positions),
+                batch.atom_to_structure,
+                num_segments=batch.cell.shape[0],
+            )
+            + jnp.einsum("sAa,sAb->sab", batch.cell, grads.cell)
+        ) * batch.structure_mask[:, None, None]
+        return energy, forces, stress
+
+    def prepare_fn(atomss, num_k, cutoff=None, smearing=None, BM=32, BK=128):
+        # dipoles come from each atoms' "dipoles" array, like charges from
+        # get_initial_charges
         from .batching import get_batch, prepare
 
         return get_batch(

@@ -31,6 +31,11 @@ def unsorted(batch, nopbc):
     return batch._replace(others_perm=None), nopbc._replace(others_perm=None)
 
 
+def random_dipoles(batch):
+    mu = np.random.default_rng(1).normal(size=batch.positions.shape)
+    return mu * batch.atom_mask[:, None]
+
+
 def assert_sorted(x):
     x = np.asarray(x)
     assert np.all(x[1:] >= x[:-1])
@@ -83,7 +88,7 @@ def test_get_batch_sorts_unsorted_sample():
     shuffled |= {k: sample[k][p] for k in ("centers", "others", "cell_shifts")}
     del shuffled["others_perm"]
 
-    batches = [get_batch([s]) for s in (sample, shuffled)]
+    batches = [(q, *rest) for q, _, *rest in (get_batch([s]) for s in (sample, shuffled))]
     assert_sorted(batches[1][1].centers)
     assert_sorted(batches[1][1].others[batches[1][1].others_perm])
     e, e_shuffled = (calc.energy_forces(*b) for b in batches)
@@ -186,11 +191,12 @@ def test_rspace_matches_full_unsorted(full_neighbor_list, exclusion_radius):
             np.testing.assert_allclose(a, b, atol=1e-12, rtol=1e-12)
 
 
-def test_pair_scatters_are_sorted_or_unique():
+@pytest.mark.parametrize("dipolar", [False, True])
+def test_pair_scatters_are_sorted_or_unique(dipolar):
     """Every scatter over a pair axis in the lowered force-training and
     Born-charge-training graphs is flagged sorted or unique: unflagged ones run
     with contended atomics on GPU, and this is where a regression would show."""
-    from jaxpme.batched_tiled import Ewald
+    from jaxpme.batched_tiled import Ewald, EwaldDipole
     from jaxpme.batched_tiled.batching import get_batch, prepare, sample_shapes
 
     calc = Ewald()
@@ -198,12 +204,16 @@ def test_pair_scatters_are_sorted_or_unique():
     # odd pair-axis sizes, so no other axis is mistaken for one
     n_pairs = sum(sample_shapes(s)["n_pairs"] for s in samples) + 7
     n_nopbc = sum(sample_shapes(s)["n_pairs_nonpbc"] for s in samples) + 3
-    charges, batch, nopbc, pbc = get_batch(
+    charges, dipoles, batch, nopbc, pbc = get_batch(
         samples, num_pairs=n_pairs, num_pairs_nonpbc=n_nopbc
     )
+    if dipolar:
+        calc, dipoles = EwaldDipole(), random_dipoles(batch)
 
     def energy(positions, charges):
-        return calc.energy(charges, batch._replace(positions=positions), nopbc, pbc).sum()
+        sr = batch._replace(positions=positions)
+        args = (charges, dipoles) if dipolar else (charges,)
+        return calc.energy(*args, sr, nopbc, pbc).sum()
 
     forces = jax.grad(energy)
 
@@ -231,6 +241,38 @@ def test_pair_scatters_are_sorted_or_unique():
         for o in pair_scatters:
             flags = [str(o.attributes[k]) for k in ("indices_are_sorted", "unique_indices")]
             assert "true" in flags, o
+
+
+def test_dipoles_match_unsorted():
+    """EwaldDipole: sorted layout and plain indexing agree on potentials, fields,
+    forces, stress, and force-training gradients wrt positions, charges, dipoles."""
+    from jaxpme.batched_tiled import EwaldDipole
+
+    calc = EwaldDipole()
+    charges, _, batch, nopbc, pbc = calc.prepare(structures(), num_k=NUM_K, cutoff=CUTOFF)
+    dipoles = random_dipoles(batch)
+
+    def everything(batch, nopbc):
+        def energy(positions, charges, dipoles):
+            sr = batch._replace(positions=positions)
+            return calc.energy(charges, dipoles, sr, nopbc, pbc).sum()
+
+        def force_loss(*args):
+            return jnp.sum(jax.grad(energy)(*args) ** 2)
+
+        return (
+            *calc.potentials(charges, dipoles, batch, nopbc, pbc),
+            *calc.energy_forces_stress(charges, dipoles, batch, nopbc, pbc),
+            *jax.jit(jax.grad(force_loss, argnums=(0, 1, 2)))(
+                batch.positions, charges, dipoles
+            ),
+        )
+
+    new = everything(batch, nopbc)
+    old = everything(*unsorted(batch, nopbc))
+    for a, b in zip(new, old):
+        assert np.all(np.isfinite(a))
+        np.testing.assert_allclose(a, b, atol=1e-11, rtol=1e-11)
 
 
 @pytest.mark.parametrize("n_max", [1, 1000, 2**16 - 1, 2**16, 2**16 + 1, 2**20])

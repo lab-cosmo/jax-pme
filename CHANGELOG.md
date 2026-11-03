@@ -5,7 +5,7 @@ All notable changes to `jax-pme` are documented here. The API is not finalised a
 ## Unreleased
 
 ### Added
-- `benchmarks/`: GPU benchmark of `batched_tiled` on fixed OMol25/OMat24/MAD batches (#PR)
+- `benchmarks/`: GPU benchmark of `batched_tiled` on fixed OMol25/OMat24/MAD batches (#44)
 
 ### Changed
 - `batched_tiled` uses a half neighbour list by default; `Ewald(full_neighbor_list=True)` for full lists (#40)

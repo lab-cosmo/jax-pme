@@ -22,25 +22,27 @@ Create a new release of jax-pme. Optional argument: version bump level (`patch`,
 - If NO bump level was given, review the changes (step 4) first, then discuss with the user what the appropriate level should be based on the nature of the changes (breaking → major, new features → minor, fixes/maintenance → patch)
 - Confirm the new version with the user before proceeding
 
-### 4. Review changes and write changelog
+### 4. Review changes and finalise the changelog
 
-- Run `git log <last-tag>..HEAD --oneline` to see all commits since the last release (or all commits if no prior tag)
-- Write a brief changelog summarising the changes, grouped by category where appropriate (features, fixes, breaking changes, maintenance, etc.)
+- Read the `## Unreleased` section of `CHANGELOG.md`, and cross-check it against `git log <last-tag>..HEAD --oneline` for anything user-facing that is missing
+- Tidy it into release notes: brief, grouped by category where appropriate (features, fixes, breaking changes, maintenance, etc.), with PR numbers
 - Present the changelog to the user for review and approval
+- On a `release/v<version>` branch, rename `## Unreleased` to `## v<version> (<YYYY-MM-DD>)` and add a fresh empty `## Unreleased` above it
+- Open a PR "Release v<version>", wait for CI, merge it, and update local `main`
 
 ### 5. Tag and push
 
-- Create an annotated tag: `git tag -a v<version> -m "Release v<version>"`
+- Tag the merge commit on `main`: `git tag -a v<version> -m "Release v<version>"`
 - Push the tag: `git push origin v<version>`
 - This triggers the `release.yml` CI workflow which builds and publishes to PyPI
 - Watch it: `gh run watch` (or `gh run list --workflow release.yml --limit 1`), and confirm the new version appears at https://pypi.org/project/jax-pme/
 
 ### 6. Create GitHub release
 
-- Use `gh release create v<version> --title "v<version>" --notes "<changelog>"` to create a GitHub release with the changelog from step 4
+- Use `gh release create v<version> --title "v<version>" --notes "<changelog>"` to create a GitHub release with the `CHANGELOG.md` section from step 4
 
 ## Notes
 
-- This project uses `setuptools_scm` — the version is derived from git tags, not from pyproject.toml. No files need to be modified.
+- This project uses `setuptools_scm` — the version is derived from git tags, not from pyproject.toml. The only file a release touches is `CHANGELOG.md`.
 - The CI release workflow uses PyPI trusted publishing (no tokens needed). The GitHub environment name (`release`) and workflow file name (`release.yml`) must match the trusted publisher configured on PyPI.
 - Run this from inside the dev repo (`jax-pme/`), not the workspace root.

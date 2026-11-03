@@ -123,9 +123,10 @@ Run from the package root: `python -m pytest tests/ -v`
 ## Releasing
 - `/release [patch|minor|major]` (`.claude/commands/release.md`) walks through the steps below
 - Push a `v*` tag (e.g. `v0.1.0`) → `.github/workflows/release.yml` builds sdist+wheel and publishes to PyPI via trusted publishing (GitHub environment `release`)
-- Then `gh release create v<version>` with a changelog; nothing in the tree needs a version bump
+- Before tagging, a release PR moves `## Unreleased` in `CHANGELOG.md` to `## v<version> (<date>)`; that section becomes the `gh release create` notes. No version bump anywhere else
 
 ## Contributing
 
 - Always make a PR and do not break CI
 - **Update CLAUDE.md and README.md before opening or merging a PR** — keep docs in sync with code changes
+- User-facing PRs add a line (with PR number) under `## Unreleased` in `CHANGELOG.md`

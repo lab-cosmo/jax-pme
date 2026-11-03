@@ -32,6 +32,7 @@ dev = ["pytest", "ruff"]
 Homepage = "https://github.com/lab-cosmo/jax-pme"
 Repository = "https://github.com/lab-cosmo/jax-pme"
 Issues = "https://github.com/lab-cosmo/jax-pme/issues"
+Changelog = "https://github.com/lab-cosmo/jax-pme/blob/main/CHANGELOG.md"
 
 [tool.setuptools_scm]
 version_file = "jaxpme/_version.py"

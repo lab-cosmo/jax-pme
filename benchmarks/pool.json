@@ -1,0 +1,115 @@
+{
+ "description": "Random structures sampled once from public datasets; npz files are distributed separately.",
+ "created": "2026-11-03",
+ "seed": 20261103,
+ "datasets": {
+  "omol25": {
+   "dataset": "OMol25",
+   "split": "train_4M",
+   "source_records": 3986754,
+   "rng": "np.random.default_rng([20261103, 0]).choice(3986754, size=2000, replace=False), sorted",
+   "structures": 2000,
+   "atoms": 112410,
+   "atoms_per_structure": {
+    "min": 3,
+    "median": 45.5,
+    "mean": 56.2,
+    "p99": 200.01999999999998,
+    "max": 337
+   },
+   "pbc": {
+    "FFF": 2000
+   },
+   "charge": {
+    "-5": 1,
+    "-4": 3,
+    "-3": 24,
+    "-2": 61,
+    "-1": 251,
+    "0": 1118,
+    "1": 357,
+    "2": 120,
+    "3": 47,
+    "4": 16,
+    "5": 1,
+    "6": 1
+   },
+   "spin_multiplicity": {
+    "1": 1633,
+    "2": 157,
+    "3": 83,
+    "4": 33,
+    "5": 56,
+    "6": 28,
+    "7": 4,
+    "8": 5,
+    "10": 1
+   },
+   "file": "omol25.npz",
+   "bytes": 2216721,
+   "sha256": "c11924349ed7de00c00048e0c9a56a5d42cf58a3180068a4011be9392dec6f1f"
+  },
+  "omat24": {
+   "dataset": "OMat24",
+   "split": "train",
+   "source_records": 100824585,
+   "rng": "np.random.default_rng([20261103, 2]).choice(100824585, size=5000, replace=False), sorted",
+   "structures": 5000,
+   "atoms": 93326,
+   "atoms_per_structure": {
+    "min": 2,
+    "median": 12.0,
+    "mean": 18.67,
+    "p99": 84.04000000000087,
+    "max": 96
+   },
+   "pbc": {
+    "TTT": 5000
+   },
+   "file": "omat24.npz",
+   "bytes": 2437082,
+   "sha256": "b41f2d9ab023ec9ef053d9aa41cc67f51c53e38e443308b26079a74c46e76827"
+  },
+  "mad16": {
+   "dataset": "MAD",
+   "split": "1.6, train",
+   "source_records": 315314,
+   "rng": "np.random.default_rng([20261103, 1]).choice(315314, size=5000, replace=False), sorted",
+   "structures": 5000,
+   "atoms": 94527,
+   "atoms_per_structure": {
+    "min": 1,
+    "median": 3.0,
+    "mean": 18.91,
+    "p99": 133.0,
+    "max": 200
+   },
+   "pbc": {
+    "FFF": 2158,
+    "TTF": 667,
+    "TTT": 2175
+   },
+   "subsets": {
+    "binary_random": 923,
+    "dimers": 500,
+    "madcat": 667,
+    "mc2d": 33,
+    "mc3d": 449,
+    "mc3d_cluster": 101,
+    "mc3d_ext": 146,
+    "mc3d_random": 20,
+    "mc3d_random_ext": 67,
+    "mc3d_rattled": 358,
+    "mc3d_surface": 64,
+    "monomers": 4,
+    "shiftml_molcrys": 115,
+    "shiftml_molfrags": 44,
+    "trimers": 46,
+    "trimers-extended": 1463
+   },
+   "file": "mad16.npz",
+   "bytes": 1851855,
+   "sha256": "110e1f55996c1c4bea2c58ed64fe0f79e2ab4074432dbccbb35612402c4a4ae1"
+  }
+ }
+}

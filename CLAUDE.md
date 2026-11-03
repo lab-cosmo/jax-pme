@@ -114,6 +114,9 @@ The `p3m_influence()` function in `kspace.py` computes 1/U²(k) to correct for B
 - Vacuum gap formula: `h_min = thickness + 1.5 * L_max` (residual ≈ exp(-3π) ≈ 7e-5)
 - Raw/effective cell split (both batched families): `prepare` keeps `structure["cell"]` raw, the shrunk cell travels alongside, and calculators compose at entry. Canonical explanation (incl. `Batch.pbc` as the row mask and the gradient policy): `jaxpme.utils.compose_cell`. Consequence: 2D-PBC stress is only meaningful in the periodic block — the non-periodic row gets no cell-gradient term.
 
+## Benchmarks
+`benchmarks/` (see its README): `batched_tiled.Ewald` timed on 16 frozen batches (`batches.json`) drawn from a structure pool of OMol25/OMat24/MAD samples. The pool npz files are not in the repo (`pool.json` has their sha256s); `run.py` times whichever `jaxpme` is importable, `compare.py` tabulates arms. Public-facing: name only the public datasets and generic hardware there. Never regenerate `batches.json`; add a new batch set instead.
+
 ## Testing
 Run from the package root: `python -m pytest tests/ -v`
 - Reference structures in `tests/reference_structures/coulomb_test_frames.xyz`

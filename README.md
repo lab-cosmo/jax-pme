@@ -152,7 +152,7 @@ charges, dipoles, *batch = calculator.prepare(atoms_list, num_k)
 phi, field = calculator.potentials(charges, dipoles, *batch)
 ```
 
-`potentials` returns per-atom potentials *and* fields, both in the halved convention of the charge-only calculators: `phi = Φ/2` and `field = E/2`, where Φ and E are the physical potential and electric field at each atom due to all other charges and dipoles. Hence `energy = Σ q φ - Σ μ·field`, `dE/dq = 2φ`, `dE/dμ = -2 field`. **The physical field (e.g. for induction, μ ← αE) is `2 * field`.** `energy_forces_stress` holds the dipoles fixed under strain, so the returned stress is not symmetric; if dipoles depend on the structure, differentiate the full model instead.
+`potentials` returns per-atom potentials *and* fields, both in the halved convention of the charge-only calculators: `phi = Φ/2` and `field = E/2`, where Φ and E are the physical potential and electric field at each atom due to all other charges and dipoles. Hence `energy = Σ q φ - Σ μ·field`, `dE/dq = 2φ`, `dE/dμ = -2 field`. **The physical field (e.g. for induction, μ ← αE) is `2 * field`.** `energy_forces_stress` holds the dipoles fixed under strain, so the returned stress is not symmetric; if dipoles depend on the structure, differentiate the full model instead. `batched_tiled.EwaldDipole` follows `batched_tiled.Ewald` for pairs: half neighbour list by default (`full_neighbor_list=True` for full lists) and the sorted pair layout.
 
 ## Development
 

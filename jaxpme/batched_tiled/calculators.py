@@ -15,11 +15,18 @@ from jaxpme.calculators import Calculator
 from jaxpme.kspace import (
     get_reciprocal,
     slab_energy_per_atom,
+    slab_field_per_atom,
     slab_geometry,
 )
 from jaxpme.potentials import potential
-from jaxpme.solvers import _rspace
-from jaxpme.utils import compose_cell, get_distances, get_volume, safe_norm
+from jaxpme.solvers import _rspace, _rspace_dipole
+from jaxpme.utils import (
+    compose_cell,
+    get_displacements,
+    get_distances,
+    get_volume,
+    safe_norm,
+)
 
 from .kernel import phi_recip_xla_vmap
 from .kspace import generate_ewald_kvectors
@@ -71,6 +78,38 @@ def _kspace_setup(pot, g_factor, sr_batch, batch_pbc):
         batch_pbc.BK.shape[0],
         n_kvec_tiles,
     )
+
+
+def _pair_layout(others, others_perm):
+    """(take, others, j_perm) for the sorted pair layout, see `batching`.
+
+    `others_perm=None` (hand-built batch) falls back to plain indexing."""
+    if others_perm is None:
+        return (lambda x, i: x[i]), others, None
+    j_perm = pairs.permutation(others, others_perm)
+    return pairs.take, j_perm, j_perm
+
+
+def _slab(q, r, seg, B, cell, volume, pbc, mu=None):
+    """2D slab correction (Coulomb) per atom on the flat layout, `/ volume`, zero
+    outside 2D systems. With dipoles `mu`, also returns the field."""
+    n_hat, basis_len = jax.vmap(slab_geometry)(cell, pbc)  # [B, 3], [B]
+    z = jnp.sum(r * n_hat[seg], axis=-1)
+    mu_z = 0.0 if mu is None else jnp.sum(mu * n_hat[seg], axis=-1)
+    M_axis = jax.ops.segment_sum(q * z + mu_z, seg, num_segments=B)
+    M_axis_sq = jax.ops.segment_sum(q * z**2 + 2 * mu_z * z, seg, num_segments=B)
+    charge_tot = jax.ops.segment_sum(q, seg, num_segments=B)
+    is_2d = (jnp.sum(pbc, axis=-1) == 2)[seg]
+
+    phi = slab_energy_per_atom(
+        z, M_axis[seg], M_axis_sq[seg], charge_tot[seg], basis_len[seg]
+    )
+    phi = jnp.where(is_2d, phi / volume[seg], 0.0)
+    if mu is None:
+        return phi
+    field = slab_field_per_atom(z, M_axis[seg], charge_tot[seg])
+    field = jnp.where(is_2d, field / volume[seg], 0.0)
+    return phi, field[:, None] * n_hat[seg]
 
 
 def Ewald(
@@ -142,14 +181,7 @@ def Ewald(
 
         is_2d = jnp.sum(pbc_pbc, axis=-1) == 2
         if _is_coulomb:
-            n_hat, basis_len = jax.vmap(slab_geometry)(cell_pbc, pbc_pbc)  # [B, 3], [B]
-            z_atom = jnp.sum(r_pbc * n_hat[seg], axis=-1)
-            M_axis = jax.ops.segment_sum(q_pbc * z_atom, seg, num_segments=B_pbc)
-            M_axis_sq = jax.ops.segment_sum(q_pbc * z_atom**2, seg, num_segments=B_pbc)
-            E_slab = slab_energy_per_atom(
-                z_atom, M_axis[seg], M_axis_sq[seg], charge_tot[seg], basis_len[seg]
-            )
-            slab_term = jnp.where(is_2d[seg], E_slab / volume_pbc[seg], 0.0)
+            slab_term = _slab(q_pbc, r_pbc, seg, B_pbc, cell_pbc, volume_pbc, pbc_pbc)
         else:
             # IPLP / custom: 2D-PBC correction is not implemented -> NaN
             slab_term = jnp.where(is_2d[seg], jnp.full_like(c_self, jnp.nan), 0.0)
@@ -218,14 +250,7 @@ def Ewald(
         pbc_mask_atom = batch.pbc_mask[batch.atom_to_structure]
         charges = charges * batch.atom_mask
 
-        def layout(others, others_perm):
-            # sorted pair layout (see batching); others_perm=None: plain indexing
-            if others_perm is None:
-                return (lambda x, i: x[i]), others, None
-            j_perm = pairs.permutation(others, others_perm)
-            return pairs.take, j_perm, j_perm
-
-        take, others, j_perm = layout(batch.others, batch.others_perm)
+        take, others, j_perm = _pair_layout(batch.others, batch.others_perm)
 
         if batch.distances is None:
             r = get_distances(
@@ -240,7 +265,7 @@ def Ewald(
 
         # real-space, non-PBC: bare 1/r between every pair, both directions
         c = batch_nopbc.centers
-        take_n, o, nopbc_perm = layout(batch_nopbc.others, batch_nopbc.others_perm)
+        take_n, o, nopbc_perm = _pair_layout(batch_nopbc.others, batch_nopbc.others_perm)
         extra_r = safe_norm(
             take_n(batch.positions, o) - take_n(batch.positions, c), axis=-1
         )
@@ -353,18 +378,18 @@ def Ewald(
     )
 
 
-def EwaldDipole(prefactor=1.0, halfspace=True):
+def EwaldDipole(prefactor=1.0, halfspace=True, full_neighbor_list=False):
     """Tile-dispatched batched Ewald for point charges and point dipoles.
 
     Coulomb only, tin-foil boundary. `potentials` returns (φ, F) with the halved
     convention of `jaxpme.EwaldDipole`: energy = Σ q φ - Σ μ·F, physical field 2F.
+    `full_neighbor_list` as in `Ewald`.
     """
-    from jaxpme.kspace import slab_field_per_atom
     from jaxpme.potentials import coulomb, dipole_self_field
-    from jaxpme.solvers import _rspace_dipole
-    from jaxpme.utils import get_displacements
+    from jaxpme.solvers import ewald_dipole
 
     pot = potential(exponent=1)
+    solver = ewald_dipole(pot, full_neighbor_list=full_neighbor_list)
     raw = coulomb()
     g_factor = 2 if halfspace else 1
 
@@ -413,23 +438,11 @@ def EwaldDipole(prefactor=1.0, halfspace=True):
         )
         field += dipole_self_field(smearing_pbc)[seg][:, None] * mu_pbc
 
-        # 2D slab, with the dipoles' normal components in the moments
-        n_hat, basis_len = jax.vmap(slab_geometry)(cell_pbc, pbc_pbc)
-        z = jnp.sum(r_pbc * n_hat[seg], axis=-1)
-        mu_z = jnp.sum(mu_pbc * n_hat[seg], axis=-1)
-        M_axis = jax.ops.segment_sum(q_pbc * z + mu_z, seg, num_segments=B_pbc)
-        M_axis_sq = jax.ops.segment_sum(
-            q_pbc * z**2 + 2 * mu_z * z, seg, num_segments=B_pbc
+        slab_phi, slab_field = _slab(
+            q_pbc, r_pbc, seg, B_pbc, cell_pbc, volume_pbc, pbc_pbc, mu=mu_pbc
         )
-        slab_phi = slab_energy_per_atom(
-            z, M_axis[seg], M_axis_sq[seg], charge_tot[seg], basis_len[seg]
-        )
-        slab_field = slab_field_per_atom(z, M_axis[seg], charge_tot[seg])
-        is_2d = (jnp.sum(pbc_pbc, axis=-1) == 2)[seg]
-        phi += jnp.where(is_2d, slab_phi / volume_pbc[seg], 0.0)
-        field += jnp.where(
-            is_2d[:, None], (slab_field / volume_pbc[seg])[:, None] * n_hat[seg], 0.0
-        )
+        phi += slab_phi
+        field += slab_field
 
         phi = jax.ops.segment_sum(phi * mask, batch_pbc.pbc_to_flat, num_segments=N_all)
         field = jax.ops.segment_sum(
@@ -447,33 +460,32 @@ def EwaldDipole(prefactor=1.0, halfspace=True):
         charges = charges * batch.atom_mask
         dipoles = dipoles * batch.atom_mask[:, None]
 
-        # real-space, non-PBC: bare interactions between every pair (half list)
-        R = (
-            batch.positions[batch_nopbc.others] - batch.positions[batch_nopbc.centers]
-        ) * batch_nopbc.pair_mask[:, None]
+        # real-space, non-PBC: bare interactions between every pair, both directions
+        c = batch_nopbc.centers
+        take, o, j_perm = _pair_layout(batch_nopbc.others, batch_nopbc.others_perm)
+        R = take(batch.positions, o) - take(batch.positions, c)
+        R = R * batch_nopbc.pair_mask[:, None]
         phi_np, field_np = _rspace_dipole(
-            pot, None, charges, dipoles, R, batch_nopbc.centers, batch_nopbc.others
+            pot, None, charges, dipoles, R, c, batch_nopbc.others, j_perm=j_perm
         )
 
-        # real-space, PBC: range-separated short-range from the (full) neighbor list
-        R = (
-            get_displacements(
-                batch.cell[batch.pair_to_structure],
-                batch.positions[batch.centers],
-                batch.positions[batch.others],
-                batch.cell_shifts,
-            )
-            * batch.pair_mask[:, None]
+        # real-space, PBC: range-separated short-range from the neighbor list
+        take, o, j_perm = _pair_layout(batch.others, batch.others_perm)
+        R = get_displacements(
+            take(batch.cell, batch.pair_to_structure),
+            take(batch.positions, batch.centers),
+            take(batch.positions, o),
+            batch.cell_shifts,
         )
-        phi_sr, field_sr = _rspace_dipole(
-            pot,
-            batch.smearing[batch.pair_to_structure],
+        R = R * batch.pair_mask[:, None]
+        phi_sr, field_sr = solver.rspace(
+            take(batch.smearing, batch.pair_to_structure),
             charges,
             dipoles,
             R,
             batch.centers,
             batch.others,
-            full_neighbor_list=True,
+            j_perm=j_perm,
         )
 
         phi_k, field_k = kspace_fn(charges, dipoles, batch, batch_pbc)
@@ -533,6 +545,7 @@ def EwaldDipole(prefactor=1.0, halfspace=True):
                     cutoff=cutoff,
                     smearing=smearing,
                     halfspace=halfspace,
+                    full_list=full_neighbor_list,
                 )
                 for atoms in atomss
             ],

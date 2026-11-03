@@ -164,11 +164,16 @@ def ewald(potential, full_neighbor_list=False, halfspace=False):
 
 
 def _rspace_dipole(
-    potential, smearing, charges, dipoles, R, i, j, full_neighbor_list=False
+    potential, smearing, charges, dipoles, R, i, j, full_neighbor_list=False, j_perm=None
 ):
+    # j_perm: as in `_rspace`
     from .utils import safe_norm
 
     N = charges.shape[0]
+    if j_perm is None:
+        take, segment_sum = (lambda x, idx: x[idx]), jax.ops.segment_sum
+    else:
+        take, segment_sum, j = pairs.take, pairs.segment_sum, j_perm
 
     r = safe_norm(R, axis=-1)
     psi, d1, d2 = potential.sr_derivatives(smearing, r)
@@ -189,31 +194,29 @@ def _rspace_dipole(
         )
         return phi, field
 
-    phi_ij, field_ij = from_source(charges[j], dipoles[j], 1.0)
-    phi = jax.ops.segment_sum(phi_ij, i, num_segments=N)
-    field = jax.ops.segment_sum(field_ij, i, num_segments=N)
+    phi_ij, field_ij = from_source(take(charges, j), take(dipoles, j), 1.0)
+    phi = segment_sum(phi_ij, i, N)
+    field = segment_sum(field_ij, i, N)
 
     if not full_neighbor_list:
-        phi_ji, field_ji = from_source(charges[i], dipoles[i], -1.0)
-        phi += jax.ops.segment_sum(phi_ji, j, num_segments=N)
-        field += jax.ops.segment_sum(field_ji, j, num_segments=N)
+        phi_ji, field_ji = from_source(take(charges, i), take(dipoles, i), -1.0)
+        phi += segment_sum(phi_ji, j, N)
+        field += segment_sum(field_ji, j, N)
 
     return phi / 2, field / 2
 
 
-def ewald_dipole(potential, full_neighbor_list=False, halfspace=False):
+def ewald_dipole(potential, full_neighbor_list=False):
     from .kspace import slab_energy_per_atom, slab_field_per_atom, slab_geometry
     from .potentials import dipole_self_field
 
     rspace = partial(_rspace_dipole, potential, full_neighbor_list=full_neighbor_list)
 
-    g_factor = 2 if halfspace else 1
-
     def kspace(smearing, charges, dipoles, kvectors, positions, volume, cell, pbc):
         k2 = jax.lax.square(kvectors).sum(axis=-1)  # -> [k]
 
         # k=0 carries no Coulomb contribution (tin-foil, neutralizing background)
-        G = jnp.where(k2 == 0.0, 0.0, potential.lr(smearing, k2) * g_factor)
+        G = jnp.where(k2 == 0.0, 0.0, potential.lr(smearing, k2))
         trig_args = kvectors @ (positions.T)  # -> [k, i]
 
         c = jnp.cos(trig_args)

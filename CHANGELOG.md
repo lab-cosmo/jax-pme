@@ -4,9 +4,13 @@ All notable changes to `jax-pme` are documented here. The API is not finalised a
 
 ## Unreleased
 
+### Added
+- `EwaldDipole` (serial and `batched_tiled`): potentials and fields of point charges and dipoles, experimental (#38)
+
 ### Changed
 - `batched_tiled` uses a half neighbour list by default; `Ewald(full_neighbor_list=True)` for full lists (#40)
 - `batched_tiled` uses a sorted pair layout, making forces and force-training gradients much faster on GPU (#41)
+- `batched_tiled.batching.get_batch` returns `charges, dipoles, sr_batch, nonperiodic, periodic` (#38)
 
 ## v0.1.0 (2026-09-24)
 

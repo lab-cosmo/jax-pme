@@ -63,6 +63,7 @@ Pinned by `tests/test_batched_tiled_kernel_memory.py` via `memory_analysis()`.
 - Real space: radial derivatives ψ′, ψ″ of the scalar kernel via nested jvp (`Potential.sr_derivatives`), contracted in `solvers._rspace_dipole`; keeps third-order AD (forces of a field-dependent model, BEC) cheap. With `exclusion_radius` the cutoff multiplies ψ, ψ′, ψ″ *after* differentiation (torch-pme convention): differentiating f_c would leak f_c″(R) ≠ 0 into dipole energies and charge–dipole forces and make them jump at R
 - Self field `+4β³/(3√π) μ` (β = 1/(√2σ), `potentials.dipole_self_field`) ↔ self energy `−2β³/(3√π)|μ|²`
 - Slab: `M_axis` gains Σμ_z and `M_axis_sq` gains 2Σμ_z z; field from `kspace.slab_field_per_atom` (−d/dz of `slab_energy_per_atom`)
+- `batched_tiled.EwaldDipole` shares `Ewald`'s pair handling: `full_neighbor_list` (half by default) for both `prepare` and real space, `_pair_layout` + `_rspace_dipole(j_perm=...)` for the sorted layout, `_slab` for the 2D term (with `mu`, also the field)
 - Tiled kernel: `mu=None` keeps the charge-only path byte-identical; with `mu`, pass 1 adds one [BM,3]@[3,BK] matmul, pass 2 also returns the field (same trig)
 - Stress holds μ fixed → asymmetric (torque term); a model predicting μ owns ∂μ/∂ε
 - Not supported: PME/P3M, `batched_mixed`/`batched_flat`, custom/power-law potentials, quadrupoles (would add −½ k·Q·k to S(k)), precomputed `distances`

@@ -61,14 +61,16 @@ def serial_reference(atoms, cutoff, smearing):
     return phi, field, energy, forces, stress
 
 
-@pytest.mark.parametrize("BM, BK", [(32, 128), (8, 32)])
-def test_vs_serial(BM, BK):
+@pytest.mark.parametrize(
+    "BM, BK, full_neighbor_list", [(32, 128, False), (8, 32, False), (32, 128, True)]
+)
+def test_vs_serial(BM, BK, full_neighbor_list):
     cutoff = 6.0
     smearing = 1.5
     atomss = structures()
     num_k = max(_num_k_for_lr(a, cutoff / 8) for a in atomss if a.get_pbc().all())
 
-    calculator = EwaldDipole()
+    calculator = EwaldDipole(full_neighbor_list=full_neighbor_list)
     inputs = calculator.prepare(
         atomss, num_k, cutoff=cutoff, smearing=smearing, BM=BM, BK=BK
     )

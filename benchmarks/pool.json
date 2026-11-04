@@ -86,9 +86,10 @@
    },
    "pbc": {
     "FFF": 2158,
-    "TTF": 667,
-    "TTT": 2175
+    "TTF": 764,
+    "TTT": 2078
    },
+   "pbc_note": "mc2d and mc3d_surface are labelled 3D periodic in v1.6 but were computed as slabs with a dipole correction (vacuum along c); relabelled TTF here (97 structures)",
    "subsets": {
     "binary_random": 923,
     "dimers": 500,
@@ -108,8 +109,8 @@
     "trimers-extended": 1463
    },
    "file": "mad16.npz",
-   "bytes": 1851855,
-   "sha256": "110e1f55996c1c4bea2c58ed64fe0f79e2ab4074432dbccbb35612402c4a4ae1"
+   "bytes": 1851856,
+   "sha256": "73976debb9e57226d6335fad365131ff844a60a12e78d4b20d8a99613484c9cb"
   }
  }
 }

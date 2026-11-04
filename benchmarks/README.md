@@ -12,7 +12,7 @@ Timing of `jaxpme.batched_tiled.Ewald` on fixed batches of real structures, to c
 | `omat24` | OMat24 [2] | `train` | 5000 | 93k, all 3D periodic |
 | `mad16` | MAD [3] | v1.6 `train` | 5000 | 95k, mixed 3D / 2D slabs / non-periodic |
 
-The pool itself (three npz files, ~6.5 MB) is not in the repository; `pool.load` checks each file against the sha256 in `pool.json`. Positions, numbers, cells and pbc come from the datasets; charges are synthetic (per-atom N(0, 0.4), shifted to each structure's total charge, which is the OMol25 charge and 0 otherwise), generated from a seed stored with each batch.
+MAD v1.6 labels its `mc2d` and `mc3d_surface` slabs as 3D periodic, although they were computed as slabs with a dipole correction; the pool relabels them as 2D periodic (vacuum along c). The pool itself (three npz files, ~6.5 MB) is not in the repository; `pool.load` checks each file against the sha256 in `pool.json`. Positions, numbers, cells and pbc come from the datasets; charges are synthetic (per-atom N(0, 0.4), shifted to each structure's total charge, which is the OMol25 charge and 0 otherwise), generated from a seed stored with each batch.
 
 `batches.json` freezes 16 batches drawn from the pool by `make_batches.py`: sets `omol`, `omat`, `mad` and `joint` (equal atom shares of the three), each as `small` (2048 atoms, 3 draws) and `large` (24576 atoms, 1 draw). Members are stored explicitly, so the batches don't change with the script. Add a new batch set rather than regenerating this one.
 

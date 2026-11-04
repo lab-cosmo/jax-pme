@@ -25,6 +25,8 @@ energies, forces, stress = calculator.energy_forces_stress(
 
 The periodic neighbour list is a half list (each pair once) and the calculator sums both directions. `Ewald(full_neighbor_list=True)` switches both `prepare` and the calculator to full lists; a batch assembled by hand must use the list type the calculator was built for.
 
+Pairs are stored in a sorted layout: `centers` sorted, and `Batch.others_perm` / `NonPeriodic.others_perm` with `others[others_perm]` sorted, padding pairs last on the padding atom. The real-space term then uses only sorted gathers, sorted segment sums and permutations, which keeps forces and higher derivatives cheap on GPU (see `jaxpme/pairs.py`). `get_batch` sorts samples that are not centre-sorted; a hand-built `Batch` with `others_perm=None` uses plain indexing.
+
 ## How it works
 
 The standard Ewald reciprocal sum is the structure-factor form:

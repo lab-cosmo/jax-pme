@@ -37,7 +37,7 @@ tests/
 ## Key APIs
 - **Serial**: `Ewald()`, `PME()`, or `P3M()` → `.prepare()` → `.energy()/.potentials()/.energy_forces()/.energy_forces_stress()`
 - **Batched**: `jaxpme.batched_mixed.Ewald()` → `.prepare([atoms_list], cutoff)` → same methods but batched
-- **Tiled batched**: `jaxpme.batched_tiled.Ewald()` → `.prepare([atoms_list], num_k)` — sum-pads atoms per system (heterogeneous-batch friendly), routes reciprocal sum through tile-dispatched XLA kernel. `num_k` is the single required knob: it fixes the k-grid and the real-space `cutoff` derives from it, so `cutoff` is normally omitted (pass it only to override). See README for the convention.
+- **Tiled batched**: `jaxpme.batched_tiled.Ewald()` → `.prepare([atoms_list], num_k)` — sum-pads atoms per system (heterogeneous-batch friendly), routes reciprocal sum through tile-dispatched XLA kernel. `num_k` is the single required knob: it fixes the k-grid and the real-space `cutoff` derives from it, so `cutoff` is normally omitted (pass it only to override). See README for the convention. Periodic pairs are a half list by default (`to_structure(..., full_list=False)`); `Ewald(full_neighbor_list=...)` sets list type for both `prepare` and the real-space sum, so they cannot disagree when the calculator's own `prepare` is used. `batched_mixed` keeps full lists.
 
 ### batched_tiled kernel invariant
 Per-tile code in `kernel.py` must fold the system index `b` into the

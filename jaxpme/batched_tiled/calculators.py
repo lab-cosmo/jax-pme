@@ -28,8 +28,13 @@ def Ewald(
     prefactor=1.0,
     custom_potential=None,
     halfspace=True,
+    full_neighbor_list=False,
 ):
-    """Tile-dispatched batched Ewald calculator."""
+    """Tile-dispatched batched Ewald calculator.
+
+    `full_neighbor_list` must match the periodic pair lists in the batch: `prepare`
+    builds them accordingly, a batch assembled from other samples has to agree.
+    """
     from jaxpme.solvers import ewald
 
     pot = potential(
@@ -37,7 +42,7 @@ def Ewald(
         exclusion_radius=None,
         custom_potential=custom_potential,
     )
-    solver = ewald(pot, full_neighbor_list=True, halfspace=halfspace)
+    solver = ewald(pot, full_neighbor_list=full_neighbor_list, halfspace=halfspace)
     g_factor = 2 if halfspace else 1
 
     # raw potential for correction-side dispatch (Coulomb gets 2D slab,
@@ -327,6 +332,7 @@ def Ewald(
                     cutoff=cutoff,
                     smearing=smearing,
                     halfspace=halfspace,
+                    full_list=full_neighbor_list,
                 )
                 for atoms in atomss
             ],

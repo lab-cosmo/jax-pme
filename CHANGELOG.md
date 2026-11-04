@@ -4,6 +4,9 @@ All notable changes to `jax-pme` are documented here. The API is not finalised a
 
 ## Unreleased
 
+### Changed
+- `batched_tiled` uses a half neighbour list by default; `Ewald(full_neighbor_list=True)` for full lists (#40)
+
 ## v0.1.0 (2026-09-24)
 
 First release of jax-pme on PyPI: Ewald summation and particle-mesh methods in JAX.

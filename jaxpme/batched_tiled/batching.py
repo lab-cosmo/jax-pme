@@ -342,7 +342,15 @@ def get_batch(
     return charges, sr_batch, nonperiodic_batch, periodic_batch
 
 
-def prepare(atoms, num_k, cutoff=None, smearing=None, halfspace=True, dtype=np.float64):
+def prepare(
+    atoms,
+    num_k,
+    cutoff=None,
+    smearing=None,
+    halfspace=True,
+    dtype=np.float64,
+    full_list=False,
+):
     """Per-structure preprocessing.
 
     `num_k` fixes the reciprocal grid via `lr_wavelength_for_num_k` (K_b counts
@@ -373,7 +381,7 @@ def prepare(atoms, num_k, cutoff=None, smearing=None, halfspace=True, dtype=np.f
             cutoff = lr_wavelength * 8.0
         if smearing is None:
             smearing = lr_wavelength * 2.0
-        structure = to_structure(atoms, cutoff, dtype=dtype)
+        structure = to_structure(atoms, cutoff, dtype=dtype, full_list=full_list)
     else:
         # non-pbc real space is the bare 1/r sum over *all* pairs (built in
         # to_lr), so the cutoff neighbor list would only be masked off here.

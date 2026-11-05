@@ -256,7 +256,9 @@ def test_shard_map_matches_one_device():
     """Data parallelism: `shard_map_pairs.py`, in a fresh process with two
     virtual CPU devices (they must exist before JAX initialises), gives every
     device's batch the one-device energy, forces and force-training gradient,
-    and an invariant operand the sum of the devices' gradients."""
+    and an invariant operand the sum of the devices' gradients. Skipped after
+    the invariant-operand check where JAX cannot differentiate `erf` under
+    `shard_map` (the script's `SKIP`)."""
     script = Path(__file__).parent / "shard_map_pairs.py"
     flags = os.environ.get("XLA_FLAGS", "") + " --xla_force_host_platform_device_count=2"
     env = {**os.environ, "JAX_PLATFORMS": "cpu", "XLA_FLAGS": flags.strip()}
@@ -269,4 +271,7 @@ def test_shard_map_matches_one_device():
         timeout=900,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "invariant operand: gradient" in proc.stdout
+    if "SKIP" in proc.stdout:
+        pytest.skip(proc.stdout.split("SKIP", 1)[1].strip())
     assert "all match" in proc.stdout

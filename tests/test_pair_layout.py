@@ -6,6 +6,11 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 from ase.build import bulk
 from ase.io import read
@@ -244,3 +249,24 @@ def test_argsort_stable_matches_numpy(n_max):
     idx[0] = n_max - 1
     for i in (idx, idx.astype(np.uint64), idx[:0]):
         np.testing.assert_array_equal(_argsort_stable(i), np.argsort(i, kind="stable"))
+
+
+@pytest.mark.skipif(not hasattr(jax, "shard_map"), reason="needs jax.shard_map")
+def test_shard_map_matches_one_device():
+    """Data parallelism: `shard_map_pairs.py`, in a fresh process with two
+    virtual CPU devices (they must exist before JAX initialises), gives every
+    device's batch the one-device energy, forces and force-training gradient,
+    and an invariant operand the sum of the devices' gradients."""
+    script = Path(__file__).parent / "shard_map_pairs.py"
+    flags = os.environ.get("XLA_FLAGS", "") + " --xla_force_host_platform_device_count=2"
+    env = {**os.environ, "JAX_PLATFORMS": "cpu", "XLA_FLAGS": flags.strip()}
+    proc = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=script.parent,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "all match" in proc.stdout

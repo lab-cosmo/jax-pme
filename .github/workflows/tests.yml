@@ -16,13 +16,16 @@ jobs:
           - os: ubuntu-22.04
             python-version: "3.10"
             jax-version: "0.4.30"
-          # Latest versions
+          # Latest versions, with JAX pinned to 0.11: JAX 0.12.0.1 cannot differentiate
+          # erf/erfc on a per-device array under jax.shard_map ("Primitive polynomial
+          # requires varying manual axes to match"), which test_shard_map_matches_one_device
+          # needs for the Coulomb kernel. Unpin once JAX fixes it.
           - os: ubuntu-22.04
             python-version: "3.12"
-            jax-version: ""
+            jax-version: "0.11.1"
           - os: macos-14
             python-version: "3.12"
-            jax-version: ""
+            jax-version: "0.11.1"
 
     steps:
       - uses: actions/checkout@v4

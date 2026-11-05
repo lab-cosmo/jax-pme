@@ -7,9 +7,8 @@ own batch, as in data-parallel training: the energy, the forces and the
 force-training gradient (reverse over reverse, positions and charges) must
 match a plain call per batch. An invariant array gathered and reduced through a
 per-device permutation must get the sum of the devices' gradients. Exits
-non-zero on the first mismatch. Where JAX itself cannot differentiate `erf`
-on a per-device array (JAX 0.12.0.1), the batched_tiled part is skipped after
-the invariant-operand check and the script prints `SKIP` with the reason.
+non-zero on the first mismatch. Needs a JAX that can differentiate `erf` on a
+per-device array under `shard_map`: 0.11 can, 0.12.0.1 cannot (CI pins 0.11).
 """
 
 import numpy as np
@@ -57,22 +56,6 @@ def check(name, got, want):
         sys.exit(f"{name} differs from one device: relative error {err:.3e}")
 
 
-def _erf_gradient_broken(mesh):
-    """Why JAX cannot differentiate `erf` (the real-space Coulomb kernel) on a
-    per-device array inside `shard_map`, or None when it can."""
-    from jax.scipy.special import erf
-
-    @partial(jax.shard_map, mesh=mesh, in_specs=P("dp"), out_specs=P("dp"))
-    def grad_erf(x):
-        return jax.grad(lambda y: jnp.sum(erf(y)))(x)
-
-    try:
-        jax.jit(grad_erf)(jnp.linspace(0.1, 2.0, 2 * len(mesh.devices)))
-    except ValueError as e:
-        return f"jax {jax.__version__} fails on grad(erf): {str(e).splitlines()[0][:120]}"
-    return None
-
-
 def main():
     from jaxpme import pairs
     from jaxpme.batched_tiled import Ewald
@@ -111,11 +94,6 @@ def main():
     ]
     check("invariant operand: value", value, sum(r[0] for r in ref))
     check("invariant operand: gradient", grad, sum(r[1] for r in ref))
-
-    reason = _erf_gradient_broken(mesh)
-    if reason:
-        print(f"SKIP batched_tiled under shard_map: {reason}", flush=True)
-        return
 
     calc = Ewald()
     batches = [

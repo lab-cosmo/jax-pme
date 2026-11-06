@@ -65,6 +65,9 @@ if not args.smoke:
 if args.data_parallel:
     assert len(jax.devices()) >= args.data_parallel, f"need {args.data_parallel} devices"
     mesh = Mesh(np.array(jax.devices()[: args.data_parallel]), ("dp",))
+    shard_map = getattr(jax, "shard_map", None)
+    if shard_map is None:  # jax < 0.6
+        from jax.experimental.shard_map import shard_map
 
 batches_path = HERE / "batches.json"
 batches = json.loads(batches_path.read_text())["batches"]
@@ -197,9 +200,7 @@ def data_parallel(fn, inputs):
         out = fn(*jax.tree.unflatten(treedef, [x[0] for x in stacked]))
         return jax.tree.map(lambda y: y[None], out)
 
-    return jax.shard_map(per_device, mesh=mesh, in_specs=P("dp"), out_specs=P("dp")), (
-        stacked,
-    )
+    return shard_map(per_device, mesh=mesh, in_specs=P("dp"), out_specs=P("dp")), (stacked,)
 
 
 def deviation(fn, inputs, sharded, stacked):
@@ -253,14 +254,22 @@ for batch in batches:
         )
         if not args.data_parallel or row.get("oom"):
             continue
-        sharded, stacked = data_parallel(fn, inputs)
         dp_op = f"{op}[dp{args.data_parallel}]"
-        row = info | {"op": dp_op} | measure(sharded, stacked)
-        if not row.get("oom"):
-            row["dp_dev"] = deviation(fn, inputs, sharded, stacked)
+        try:
+            sharded, stacked = data_parallel(fn, inputs)
+            row = info | {"op": dp_op} | measure(sharded, stacked)
+            if not row.get("oom"):
+                row["dp_dev"] = deviation(fn, inputs, sharded, stacked)
+        except Exception as e:
+            # a revision that breaks under shard_map: record it, keep timing the rest
+            row = info | {"op": dp_op, "error": f"{type(e).__name__}: {e}"[:300]}
+            jax.clear_caches()
         emit(row)
-        med = "OOM" if row.get("oom") else f"{1e3 * row['median_s']:9.3f} ms"
-        dev = f"dev {row['dp_dev']:.1e}" if "dp_dev" in row else ""
+        if "median_s" in row:
+            med = f"{1e3 * row['median_s']:9.3f} ms"
+        else:
+            med = "OOM" if row.get("oom") else "FAILED"
+        dev = f"dev {row['dp_dev']:.1e}" if "dp_dev" in row else row.get("error", "")[:80]
         print(
             f"{args.label:8} {batch['name']:16} {dp_op:22} {med}  "
             f"1st {row.get('first_call_s', 0):5.1f} s  {dev}",

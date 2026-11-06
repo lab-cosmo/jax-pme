@@ -34,22 +34,17 @@ def table(rows, op):
     for r in rows:
         by[r["batch"]][r["label"]] = r
     ref = arms[0]
+    dp = any("dp_dev" in r or "error" in r for r in rows)
     head = (
         ["batch", "pairs"]
         + [f"{a} ms" for a in arms]
         + [f"{ref}/{a}" for a in arms[1:]]
         + ["dev"]
+        + ([f"{a} dp_dev" for a in arms] if dp else [])
     )
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for batch, cells in by.items():
-        ms = [
-            "OOM"
-            if cells.get(a, {}).get("oom")
-            else f"{1e3 * cells[a]['median_s']:.3f}"
-            if a in cells
-            else "-"
-            for a in arms
-        ]
+        ms = [cell_ms(cells.get(a)) for a in arms]
         ratios, devs = [], []
         r0 = cells.get(ref)
         for a in arms[1:]:
@@ -62,8 +57,21 @@ def table(rows, op):
             str(cells[a]["pairs"] + cells[a]["pairs_nonpbc"]) for a in arms if a in cells
         )
         dev = f"{max(devs):.1e}" if devs else "-"
-        lines.append("| " + " | ".join([batch, pairs] + ms + ratios + [dev]) + " |")
+        dp_devs = [
+            f"{cells[a]['dp_dev']:.1e}" if "dp_dev" in cells.get(a, {}) else "-"
+            for a in arms
+        ]
+        cols = [batch, pairs] + ms + ratios + [dev] + (dp_devs if dp else [])
+        lines.append("| " + " | ".join(cols) + " |")
     return "\n".join(lines)
+
+
+def cell_ms(r):
+    if r is None:
+        return "-"
+    if "median_s" in r:
+        return f"{1e3 * r['median_s']:.3f}"
+    return "OOM" if r.get("oom") else "FAILED"
 
 
 def main(paths):

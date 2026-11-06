@@ -37,10 +37,19 @@ p.add_argument("--ops", nargs="+", default=list(OPS), choices=OPS)
 p.add_argument(
     "--smoke", action="store_true", help="first small batch per set, 1 repeat, CPU ok"
 )
+p.add_argument(
+    "--data-parallel",
+    type=int,
+    default=0,
+    metavar="N",
+    help="also run every op under jax.shard_map over N devices (README)",
+)
 args = p.parse_args()
 
 import jax  # noqa: E402
 import jax.numpy as jnp  # noqa: E402
+from jax.sharding import Mesh, NamedSharding  # noqa: E402
+from jax.sharding import PartitionSpec as P  # noqa: E402
 
 jax.config.update("jax_enable_x64", args.dtype == "float64")
 jax.config.update("jax_default_matmul_precision", args.matmul_precision)
@@ -53,6 +62,12 @@ from jaxpme.batched_tiled import Ewald  # noqa: E402
 device = jax.devices()[0]
 if not args.smoke:
     assert device.platform == "gpu", f"timing runs need a GPU, got {device}"
+if args.data_parallel:
+    assert len(jax.devices()) >= args.data_parallel, f"need {args.data_parallel} devices"
+    mesh = Mesh(np.array(jax.devices()[: args.data_parallel]), ("dp",))
+    shard_map = getattr(jax, "shard_map", None)
+    if shard_map is None:  # jax < 0.6
+        from jax.experimental.shard_map import shard_map
 
 batches_path = HERE / "batches.json"
 batches = json.loads(batches_path.read_text())["batches"]
@@ -86,6 +101,7 @@ meta = {
     "matmul_precision": args.matmul_precision,
     "num_k": args.num_k,
     "repeats": args.repeats,
+    "data_parallel": args.data_parallel,
     "host": platform.node(),
     "date": datetime.now().isoformat(timespec="seconds"),
     "pool": {k: v["sha256"] for k, v in MANIFEST["datasets"].items()},
@@ -172,6 +188,32 @@ def measure(fn, inputs):
     return row
 
 
+def data_parallel(fn, inputs):
+    """`fn` under `jax.shard_map` over the mesh, the batch on every device, as in
+    data-parallel training: inside, the batch's arrays vary over the mesh axis."""
+    leaves, treedef = jax.tree.flatten(inputs)
+    n = args.data_parallel
+    stacked = [jnp.broadcast_to(x, (n, *jnp.shape(x))) for x in leaves]
+    stacked = jax.device_put(stacked, NamedSharding(mesh, P("dp")))
+
+    def per_device(stacked):
+        out = fn(*jax.tree.unflatten(treedef, [x[0] for x in stacked]))
+        return jax.tree.map(lambda y: y[None], out)
+
+    return shard_map(per_device, mesh=mesh, in_specs=P("dp"), out_specs=P("dp")), (stacked,)
+
+
+def deviation(fn, inputs, sharded, stacked):
+    """Largest relative deviation of any device's output from one device's."""
+    ref = jax.tree.leaves(jax.jit(fn)(*inputs))
+    out = jax.tree.leaves(jax.jit(sharded)(*stacked))
+    dev = 0.0
+    for r, o in zip(ref, out):
+        r, o = np.asarray(r, np.float64), np.asarray(o, np.float64)
+        dev = max(dev, float(np.abs(o - r[None]).max() / max(np.abs(r).max(), 1e-30)))
+    return dev
+
+
 pool = load(args.pool)
 calc = Ewald()
 dtype = np.dtype(args.dtype)
@@ -208,5 +250,28 @@ for batch in batches:
         first = row.get("first_call_s", 0)
         print(
             f"{args.label:8} {batch['name']:16} {op:22} {med}  1st {first:5.1f} s",
+            flush=True,
+        )
+        if not args.data_parallel or row.get("oom"):
+            continue
+        dp_op = f"{op}[dp{args.data_parallel}]"
+        try:
+            sharded, stacked = data_parallel(fn, inputs)
+            row = info | {"op": dp_op} | measure(sharded, stacked)
+            if not row.get("oom"):
+                row["dp_dev"] = deviation(fn, inputs, sharded, stacked)
+        except Exception as e:
+            # a revision that breaks under shard_map: record it, keep timing the rest
+            row = info | {"op": dp_op, "error": f"{type(e).__name__}: {e}"[:300]}
+            jax.clear_caches()
+        emit(row)
+        if "median_s" in row:
+            med = f"{1e3 * row['median_s']:9.3f} ms"
+        else:
+            med = "OOM" if row.get("oom") else "FAILED"
+        dev = f"dev {row['dp_dev']:.1e}" if "dp_dev" in row else row.get("error", "")[:80]
+        print(
+            f"{args.label:8} {batch['name']:16} {dp_op:22} {med}  "
+            f"1st {row.get('first_call_s', 0):5.1f} s  {dev}",
             flush=True,
         )

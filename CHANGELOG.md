@@ -9,7 +9,7 @@ All notable changes to `jax-pme` are documented here. The API is not finalised a
 - `batched_tiled` uses a sorted pair layout, making forces and force-training gradients much faster on GPU (#41)
 
 ### Fixed
-- The sorted pair layout keeps the varying mesh axes of its operands, so `batched_tiled` works under `jax.shard_map` data parallelism again (#45)
+- `batched_tiled` works under `jax.shard_map` again (#45)
 
 ## v0.1.0 (2026-09-24)
 

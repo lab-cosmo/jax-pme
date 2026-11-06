@@ -13,11 +13,9 @@ sum are therefore primitives that transpose into each other with the flag kept;
 they are linear and have jvp, transpose and batching rules, so any composition of
 transformations works, including forward-over-reverse (there is no custom_vjp).
 
-Under `shard_map` an array's type also records the manual mesh axes it varies
-over. The primitives keep the type of their operand, and `take`/`segment_sum`
-first cast the operand to vary over the axes the indices vary over, as JAX's own
-gather does, so an invariant array indexed per device gets its cotangent summed
-over the devices.
+Under `shard_map`, the primitives keep their operand's varying mesh axes, and
+`take`/`segment_sum` first cast the operand to the indices' varying axes, as
+JAX's gather does.
 """
 
 import jax
@@ -70,7 +68,6 @@ def _vary_like(x, idx):
 
 
 def _varying(x):
-    # outside shard_map, and before jax tracked it, nothing varies
     aval = getattr(x, "aval", None)
     manual = getattr(aval, "manual_axis_type", None)  # jax >= 0.11
     axes = manual.varying if manual is not None else getattr(aval, "vma", ())
@@ -91,7 +88,6 @@ def _segment_sum_sorted(x, idx, num_segments):
 def _linear_primitive(name, impl, shape, transpose):
     p = Primitive(name)
     p.def_impl(impl)
-    # x's type with the new shape: dtype, weak type and varying mesh axes carry over
     p.def_abstract_eval(lambda x, idx, **kw: x.update(shape=shape(x, idx, **kw)))
     mlir.register_lowering(p, mlir.lower_fun(impl, multiple_results=False))
     ad.defjvp(p, lambda t, x, idx, **kw: p.bind(t, idx, **kw), None)

@@ -1,14 +1,8 @@
-"""The sorted pair layout under `jax.shard_map` against one device, in fp64.
+"""Sorted pair layout under `jax.shard_map` vs. one device, in fp64.
 
-Run in a fresh process with at least two devices, e.g.
-`XLA_FLAGS=--xla_force_host_platform_device_count=2 JAX_PLATFORMS=cpu python
-tests/shard_map_pairs.py` (`test_pair_layout.py` does). Every device gets its
-own batch, as in data-parallel training: the energy, the forces and the
-force-training gradient (reverse over reverse, positions and charges) must
-match a plain call per batch. An invariant array gathered and reduced through a
-per-device permutation must get the sum of the devices' gradients. Exits
-non-zero on the first mismatch. Needs a JAX that can differentiate `erf` on a
-per-device array under `shard_map`: 0.11 can, 0.12.0.1 cannot (CI pins 0.11).
+Needs >= 2 devices, so `test_pair_layout.py` runs it in a subprocess with
+`XLA_FLAGS=--xla_force_host_platform_device_count=2`. Fails on JAX 0.12.0.1
+(no grad of `erf` under `shard_map`).
 """
 
 import numpy as np
@@ -32,8 +26,7 @@ TOL = 1e-10
 
 
 def structures(seed):
-    """`test_pair_layout.structures`, shifted by much less than any pair's
-    distance to the cutoff, so every device's batch has the same shapes."""
+    """`test_pair_layout.structures`, slightly perturbed per seed (same shapes)."""
     frames = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index=":")
     cluster = frames[1].copy()
     cluster.set_pbc(False)
@@ -62,12 +55,12 @@ def main():
 
     devices = jax.devices()
     if len(devices) < 2:
-        sys.exit(f"needs >= 2 devices (module docstring), have {devices}")
+        sys.exit(f"needs >= 2 devices, have {devices}")
     mesh = Mesh(np.array(devices), ("dp",))
     n = len(devices)
     print(f"jax {jax.__version__}, {n} devices", flush=True)
 
-    # an invariant array through per-device neighbour lists: its gradient sums the devices'
+    # invariant x through per-device lists: gradient is the sum over devices
     m = 64
     rng = np.random.default_rng(0)
     others = rng.integers(0, m, size=(n, 3 * m))  # unsorted, as `others` is

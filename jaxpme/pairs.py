@@ -12,6 +12,10 @@ transpose yields an unflagged scatter-add. The sorted gather and sorted segment
 sum are therefore primitives that transpose into each other with the flag kept;
 they are linear and have jvp, transpose and batching rules, so any composition of
 transformations works, including forward-over-reverse (there is no custom_vjp).
+
+Under `shard_map`, the primitives keep their operand's varying mesh axes, and
+`take`/`segment_sum` first cast the operand to the indices' varying axes, as
+JAX's gather does.
 """
 
 import jax
@@ -35,7 +39,7 @@ def permutation(idx, perm):
 
 def take(x, idx):
     """`x[idx]` for sorted `idx` or a `Permutation`."""
-    x = jnp.asarray(x)
+    x = _vary_like(jnp.asarray(x), idx)
     if isinstance(idx, Permutation):
         y = _gather_sorted_p.bind(x, idx.sorted)
         return y.at[idx.inverse].get(unique_indices=True, mode="promise_in_bounds")
@@ -44,11 +48,30 @@ def take(x, idx):
 
 def segment_sum(x, idx, num_segments):
     """`jax.ops.segment_sum` for sorted `idx` or a `Permutation`."""
-    x = jnp.asarray(x)
+    x = _vary_like(jnp.asarray(x), idx)
     if isinstance(idx, Permutation):
         x = x.at[idx.perm].get(unique_indices=True, mode="promise_in_bounds")
         idx = idx.sorted
     return _segment_sum_sorted_p.bind(x, jnp.asarray(idx), num_segments=num_segments)
+
+
+def _vary_like(x, idx):
+    """`x` cast to vary over every manual mesh axis `idx` varies over."""
+    idx = idx.sorted if isinstance(idx, Permutation) else jnp.asarray(idx)
+    missing = tuple(sorted(_varying(idx) - _varying(x)))
+    if not missing:
+        return x
+    pvary = getattr(jax.lax, "pvary", None)
+    if pvary is not None:  # jax < 0.11
+        return pvary(x, missing)
+    return jax.lax.pcast(x, missing, to="varying")
+
+
+def _varying(x):
+    aval = getattr(x, "aval", None)
+    manual = getattr(aval, "manual_axis_type", None)  # jax >= 0.11
+    axes = manual.varying if manual is not None else getattr(aval, "vma", ())
+    return frozenset(axes)
 
 
 # -- primitives: registration with JAX's tracing, AD, vmap and lowering machinery --
@@ -65,9 +88,7 @@ def _segment_sum_sorted(x, idx, num_segments):
 def _linear_primitive(name, impl, shape, transpose):
     p = Primitive(name)
     p.def_impl(impl)
-    p.def_abstract_eval(
-        lambda x, idx, **kw: jax.core.ShapedArray(shape(x, idx, **kw), x.dtype)
-    )
+    p.def_abstract_eval(lambda x, idx, **kw: x.update(shape=shape(x, idx, **kw)))
     mlir.register_lowering(p, mlir.lower_fun(impl, multiple_results=False))
     ad.defjvp(p, lambda t, x, idx, **kw: p.bind(t, idx, **kw), None)
 

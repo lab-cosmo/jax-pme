@@ -8,6 +8,9 @@ All notable changes to `jax-pme` are documented here. The API is not finalised a
 - `batched_tiled` uses a half neighbour list by default; `Ewald(full_neighbor_list=True)` for full lists (#40)
 - `batched_tiled` uses a sorted pair layout, making forces and force-training gradients much faster on GPU (#41)
 
+### Fixed
+- `batched_tiled` works under `jax.shard_map` again (#45)
+
 ## v0.1.0 (2026-09-24)
 
 First release of jax-pme on PyPI: Ewald summation and particle-mesh methods in JAX.

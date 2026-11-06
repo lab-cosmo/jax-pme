@@ -574,3 +574,117 @@ def test_half_list_matches_full_list(exponent):
     for a, b in zip(half, full):
         assert np.all(np.isfinite(a))
         np.testing.assert_allclose(a, b, atol=1e-12, rtol=1e-12)
+
+
+# -- potentials at points ---------------------------------------------------------
+
+
+def _mixed_batch(cutoff=5.0, smearing=None, seed=0):
+    """A periodic cell and a cluster, with random points near the atoms."""
+    from jaxpme.batched_tiled.calculators import Ewald
+
+    atoms = read(REFERENCE_STRUCTURES_DIR / "coulomb_test_frames.xyz", index="0")
+    cluster = atoms.copy()
+    cluster.set_pbc(False)
+    num_k = _num_k_for_lr(atoms, cutoff / 8.0)
+    calculator = Ewald(prefactor=1.0)
+    prepared = calculator.prepare(
+        [atoms, cluster],
+        num_k=num_k,
+        cutoff=cutoff,
+        smearing=cutoff / 4 if smearing is None else smearing,
+    )
+    charges, sr_batch, _, _ = prepared
+    rng = np.random.default_rng(seed)
+    points = sr_batch.positions + 0.3 * rng.normal(size=sr_batch.positions.shape)
+    return calculator, prepared, [atoms, cluster], points
+
+
+def test_points_at_the_positions_reproduce_the_potentials():
+    calculator, (charges, sr_batch, nopbc, pbc), _, _ = _mixed_batch()
+    plain = calculator.potentials(charges, sr_batch, nopbc, pbc)
+    at_positions = calculator.potentials(
+        charges, sr_batch, nopbc, pbc, points=sr_batch.positions
+    )
+    np.testing.assert_array_equal(at_positions, plain)
+
+
+def test_points_match_a_direct_sum_on_a_cluster():
+    """At a point, the bare potential of every other atom's charge, halved."""
+    calculator, (charges, sr_batch, nopbc, pbc), (_, cluster), points = _mixed_batch()
+    potentials = calculator.potentials(charges, sr_batch, nopbc, pbc, points=points)
+    here = np.asarray(sr_batch.atom_to_structure == 1)
+    q = np.asarray(charges)[here]
+    r = np.asarray(sr_batch.positions)[here]
+    p = np.asarray(points)[here]
+    d = np.linalg.norm(p[:, None] - r[None], axis=-1)
+    off = ~np.eye(len(q), dtype=bool)
+    expected = np.where(off, q[None] / np.where(off, d, 1.0), 0.0).sum(axis=1) / 2
+    np.testing.assert_allclose(potentials[here], expected, rtol=1e-10, atol=1e-12)
+
+
+def test_points_match_the_serial_sum_on_a_periodic_cell():
+    """The potentials at the points equal those at zero-charge copies of the
+    atoms placed there in the serial calculator, up to the atom's own charge:
+    the copy sees it at the displacement `d` through the real-space sum, the
+    point only through the reciprocal sum less the self correction. The
+    neighbour list is the atoms', so the real-space tail at the cutoff is
+    kept below the tolerance by the narrow smearing."""
+    from ase import Atoms
+
+    from jaxpme.calculators import Ewald as SerialEwald
+
+    cutoff, sigma = 6.0, 1.0
+    calculator, (charges, sr_batch, nopbc, pbc), (atoms, _), points = _mixed_batch(
+        cutoff, sigma
+    )
+    potentials = calculator.potentials(charges, sr_batch, nopbc, pbc, points=points)
+    here = np.asarray(sr_batch.atom_to_structure == 0)
+    q = np.asarray(charges)[here]
+    r = np.asarray(sr_batch.positions)[here]
+    p = np.asarray(points)[here]
+
+    doubled = Atoms(
+        numbers=np.concatenate([atoms.numbers, atoms.numbers]),
+        positions=np.concatenate([r, p]),
+        cell=atoms.cell,
+        pbc=True,
+    )
+    serial = SerialEwald()
+    inputs = serial.prepare(
+        doubled, np.concatenate([q, np.zeros_like(q)]), cutoff, cutoff / 8, sigma
+    )
+    copies = np.asarray(serial.potentials(*inputs))[len(q) :]
+
+    d = np.linalg.norm(p - r, axis=-1)
+    from scipy.special import erfc
+
+    own = 0.5 * q * (erfc(d / (np.sqrt(2) * sigma)) / d + np.sqrt(2 / np.pi) / sigma)
+    np.testing.assert_allclose(potentials[here] + own, copies, rtol=1e-6, atol=1e-9)
+
+
+def test_points_gradient_is_the_evaluation_derivative():
+    """The gradient with respect to the points moves the evaluation only: the
+    charges stay where they are."""
+    calculator, (charges, sr_batch, nopbc, pbc), _, points = _mixed_batch()
+    rng = np.random.default_rng(1)
+    weights = jax.numpy.asarray(rng.normal(size=charges.shape))
+
+    def total(points):
+        return jax.numpy.sum(
+            weights * calculator.potentials(charges, sr_batch, nopbc, pbc, points=points)
+        )
+
+    grad = np.asarray(jax.grad(total)(jax.numpy.asarray(points)))
+    eps = 1e-5
+    mask = np.asarray(sr_batch.atom_mask)
+    for i in np.flatnonzero(mask)[:6]:
+        for a in range(3):
+            plus, minus = points.copy(), points.copy()
+            plus[i, a] += eps
+            minus[i, a] -= eps
+            fd = (
+                float(total(jax.numpy.asarray(plus)))
+                - float(total(jax.numpy.asarray(minus)))
+            ) / (2 * eps)
+            np.testing.assert_allclose(grad[i, a], fd, rtol=1e-6, atol=1e-8)

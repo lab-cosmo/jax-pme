@@ -22,25 +22,40 @@ Solver = namedtuple("Solver", ("rspace", "kspace"))
 
 
 # -- shared real-space part --
-def _rspace(potential, smearing, charges, r, i, j, full_neighbor_list=False, j_perm=None):
+def _rspace(
+    potential,
+    smearing,
+    charges,
+    r,
+    i,
+    j,
+    full_neighbor_list=False,
+    j_perm=None,
+    r_reverse=None,
+):
     # j_perm: `pairs.permutation(j, perm)`, given when i is sorted (jaxpme.pairs)
+    # r_reverse: the distances of the reverse pairs of a half list when they
+    # differ from `r` (potentials evaluated away from the charges)
     N = charges.shape[0]
 
-    if smearing is None:
-        # no range separation: sum the bare potential (non-periodic case)
-        potentials_bare = potential.real(r)
-    else:
-        potentials_bare = potential.sr(smearing, r)
+    def bare(r):
+        if smearing is None:
+            # no range separation: sum the bare potential (non-periodic case)
+            return potential.real(r)
+        return potential.sr(smearing, r)
+
+    potentials_bare = bare(r)
+    reverse_bare = potentials_bare if r_reverse is None else bare(r_reverse)
 
     if j_perm is None:
         pot = jax.ops.segment_sum(charges[j] * potentials_bare, i, num_segments=N)
         if not full_neighbor_list:
             # "reverse" pairs
-            pot += jax.ops.segment_sum(charges[i] * potentials_bare, j, num_segments=N)
+            pot += jax.ops.segment_sum(charges[i] * reverse_bare, j, num_segments=N)
     else:
         pot = pairs.segment_sum(pairs.take(charges, j_perm) * potentials_bare, i, N)
         if not full_neighbor_list:
-            pot += pairs.segment_sum(pairs.take(charges, i) * potentials_bare, j_perm, N)
+            pot += pairs.segment_sum(pairs.take(charges, i) * reverse_bare, j_perm, N)
 
     pot /= 2
 

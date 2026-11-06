@@ -47,12 +47,14 @@ def phi_recip_xla_vmap(
     BM,
     BK,
     n_kvec_tiles,
+    r_eval=None,
 ):
     """Per-atom reciprocal Ewald potential on the sum-padded flat layout.
 
     Inputs:
       r [N_total, 3]              flat atom positions (sum-padded)
       q [N_total]                 flat charges (already masked)
+      r_eval [N_total, 3]         where pass 2 evaluates; default `r`
       kvec [B, K_pad, 3]          per-system k-vectors (rectangular, padding rows = 0)
       W [B, K_pad]                per-system weights G·g_factor/V (padding rows = 0)
       atom_off [B+1]              prefix sum over per-system padded atom counts
@@ -64,6 +66,8 @@ def phi_recip_xla_vmap(
     """
     dtype = r.dtype
     N_total = r.shape[0]
+    if r_eval is None:
+        r_eval = r
     idx_dtype = atom_off.dtype
     ZERO = jnp.asarray(0, idx_dtype)
     BMc = jnp.asarray(BM, idx_dtype)
@@ -110,7 +114,7 @@ def phi_recip_xla_vmap(
         Wt = lax.dynamic_slice(W, (b, kt * BKc), (1, BK))[0]
         Sr_t = lax.dynamic_slice(Sr, (b, kt * BKc), (1, BK))[0]
         Si_t = lax.dynamic_slice(Si, (b, kt * BKc), (1, BK))[0]
-        rt = lax.dynamic_slice(r, (a_offset, ZERO), (BM, 3))
+        rt = lax.dynamic_slice(r_eval, (a_offset, ZERO), (BM, 3))
         theta = rt @ kv.T
         c = jnp.cos(theta)
         s = jnp.sin(theta)

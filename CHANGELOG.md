@@ -4,6 +4,9 @@ All notable changes to `jax-pme` are documented here. The API is not finalised a
 
 ## Unreleased
 
+### Added
+- `batched_tiled` `potentials(..., points=)` evaluates the potentials of the charges at given points instead of at the atoms (#48)
+
 ### Changed
 - `batched_tiled` uses a half neighbour list by default; `Ewald(full_neighbor_list=True)` for full lists (#40)
 - `batched_tiled` uses a sorted pair layout, making forces and force-training gradients much faster on GPU (#41)

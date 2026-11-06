@@ -156,7 +156,7 @@ def Ewald(
         c_total_pbc = (c_self + c_back + slab_term) * mask
         return jax.ops.segment_sum(c_total_pbc, batch_pbc.pbc_to_flat, num_segments=N_all)
 
-    def kspace_fn(charges, sr_batch, batch_pbc):
+    def kspace_fn(charges, sr_batch, batch_pbc, points=None):
         """Full kspace contribution per atom (kernel + corrections), /2."""
         N_all = charges.shape[0]
         (
@@ -187,6 +187,7 @@ def Ewald(
             BM=BM_use,
             BK=BK_use,
             n_kvec_tiles=n_kvec_tiles,
+            r_eval=None if points is None else points[batch_pbc.pbc_to_flat],
         )
         phi_pbc = phi_pbc * batch_pbc.pbc_atom_mask
 
@@ -212,10 +213,18 @@ def Ewald(
         )
         return (phi_full + corr) / 2
 
-    def potentials_fn(charges, batch, batch_nopbc, batch_pbc):
+    def potentials_fn(charges, batch, batch_nopbc, batch_pbc, points=None):
+        """Potentials of `charges` at `batch.positions`, evaluated at `points`
+        [N, 3] (default: the positions). The real-space sums then run from
+        each point to the other atoms' positions in both directions of the
+        half lists, and the reciprocal sum evaluates its phases at the
+        points; the self and background corrections are unchanged."""
         batch = batch._replace(cell=compose_cell(batch))
         pbc_mask_atom = batch.pbc_mask[batch.atom_to_structure]
         charges = charges * batch.atom_mask
+        positions = batch.positions
+        if points is None:
+            points = positions
 
         def layout(others, others_perm):
             # sorted pair layout (see batching); others_perm=None: plain indexing
@@ -226,26 +235,46 @@ def Ewald(
 
         take, others, j_perm = layout(batch.others, batch.others_perm)
 
+        cell_pairs = take(batch.cell, batch.pair_to_structure)
         if batch.distances is None:
             r = get_distances(
-                take(batch.cell, batch.pair_to_structure),
-                take(batch.positions, batch.centers),
-                take(batch.positions, others),
+                cell_pairs,
+                take(points, batch.centers),
+                take(positions, others),
                 batch.cell_shifts,
             )
             r = r * batch.pair_mask
         else:
             r = batch.distances
+        r_reverse = None
+        if points is not positions:
+            # the reverse pair (o, c, -shift): the point of `o` to the position of `c`
+            r_reverse = get_distances(
+                cell_pairs,
+                take(positions, batch.centers),
+                take(points, others),
+                batch.cell_shifts,
+            )
+            r_reverse = r_reverse * batch.pair_mask
 
         # real-space, non-PBC: bare 1/r between every pair, both directions
         c = batch_nopbc.centers
         take_n, o, nopbc_perm = layout(batch_nopbc.others, batch_nopbc.others_perm)
-        extra_r = safe_norm(
-            take_n(batch.positions, o) - take_n(batch.positions, c), axis=-1
-        )
+        extra_r = safe_norm(take_n(positions, o) - take_n(points, c), axis=-1)
         extra_r = extra_r * batch_nopbc.pair_mask
+        extra_reverse = None
+        if points is not positions:
+            extra_reverse = safe_norm(take_n(points, o) - take_n(positions, c), axis=-1)
+            extra_reverse = extra_reverse * batch_nopbc.pair_mask
         real_space = _rspace(
-            pot, None, charges, extra_r, c, batch_nopbc.others, j_perm=nopbc_perm
+            pot,
+            None,
+            charges,
+            extra_r,
+            c,
+            batch_nopbc.others,
+            j_perm=nopbc_perm,
+            r_reverse=extra_reverse,
         )
         real_space = real_space * batch.atom_mask * ~pbc_mask_atom
 
@@ -258,13 +287,18 @@ def Ewald(
                 batch.centers,
                 batch.others,
                 j_perm=j_perm,
+                r_reverse=r_reverse,
             )
             * batch.atom_mask
             * pbc_mask_atom
         )
 
         # reciprocal-space
-        k_space = kspace_fn(charges, batch, batch_pbc) * batch.atom_mask * pbc_mask_atom
+        k_space = (
+            kspace_fn(charges, batch, batch_pbc, points=points)
+            * batch.atom_mask
+            * pbc_mask_atom
+        )
 
         return (real_space + k_space) * prefactor
 
